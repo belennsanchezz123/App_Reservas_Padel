@@ -224,13 +224,14 @@ function getMonitorClasses(monitorId) {
 // STUDENT MANAGEMENT
 // ==========================================
 
-async function addStudent(name, email, phone) {
+async function addStudent(name, email, phone, level = null) {
     try {
         const student = {
             id: generateId(),
             name,
             email,
             phone,
+            level: level !== null && level !== '' ? parseFloat(level) : null,
             registeredDate: new Date().toISOString(),
         };
 
@@ -567,8 +568,12 @@ function renderStudentsList() {
         const card = document.createElement('div');
         card.className = 'student-card';
 
+        const levelDisplay = student.level !== null && student.level !== undefined
+            ? `<span class="level-badge">Nivel: ${student.level}</span>`
+            : '';
+
         card.innerHTML = `
-            <h4>${student.name}</h4>
+            <h4>${student.name} ${levelDisplay}</h4>
             <p>${student.email || 'Sin email'}</p>
             <p>${student.phone || 'Sin teléfono'}</p>
             <div class="student-stats">${classCount} ${classCount === 1 ? 'clase' : 'clases'}</div>
@@ -841,15 +846,22 @@ async function handleStudentFormSubmit(e) {
     const name = document.getElementById('studentName').value.trim();
     const email = document.getElementById('studentEmail').value.trim();
     const phone = document.getElementById('studentPhone').value.trim();
+    const level = document.getElementById('studentLevel').value.trim();
 
     if (!name) {
         showToast('El nombre es obligatorio', 'error');
         return;
     }
 
+    // Validate level if provided
+    if (level !== '' && (isNaN(level) || parseFloat(level) < 0 || parseFloat(level) > 5)) {
+        showToast('El nivel debe ser un número entre 0 y 5', 'error');
+        return;
+    }
+
     try {
         showLoading('Guardando alumno...');
-        await addStudent(name, email, phone);
+        await addStudent(name, email, phone, level !== '' ? parseFloat(level) : null);
         hideLoading();
         closeModal('studentModal');
         document.getElementById('studentForm').reset();

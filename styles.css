@@ -1223,3 +1223,18 @@ form {
         gap: var(--spacing-md);
     }
 }
+
+/* ==========================================
+   STUDENT LEVEL BADGE
+   ========================================== */
+.level-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, var(--primary-green), var(--primary-green-light));
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    margin-left: 0.5rem;
+    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+}
