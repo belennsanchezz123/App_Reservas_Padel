@@ -10,36 +10,31 @@
 // 3. Reemplaza los valores abajo
 
 const SUPABASE_CONFIG = {
-    url: 'TU_SUPABASE_URL',  // Ejemplo: https://abcdefgh.supabase.co
-    anonKey: 'TU_SUPABASE_ANON_KEY'  // La clave pública (anon key)
+    url: 'https://jfpitfzaluyppxkgmjdt.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpmcGl0ZnphbHV5cHB4a2dtamR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2ODc2OTEsImV4cCI6MjA4NTI2MzY5MX0.fD1g51KL2YbSm3Dy4hbH_TPWmqb9dBN2WX5_lBcEH58'
 };
 
-// Inicializar cliente de Supabase
-// Usaremos el CDN de Supabase que se carga en index.html
-let supabase = null;
+// Verificar que la biblioteca de Supabase esté cargada
+if (typeof window.supabase === 'undefined') {
+    console.error('❌ ERROR: Supabase library not loaded from CDN!');
+    console.error('Make sure index.html includes the Supabase CDN script.');
+} else {
+    console.log('✅ Supabase library loaded from CDN');
+}
 
-function initSupabase() {
-    if (typeof window.supabase === 'undefined') {
-        console.error('Supabase library not loaded. Make sure to include the CDN script in index.html');
-        return null;
-    }
+// Inicializar cliente de Supabase GLOBALMENTE
+// Esta variable debe ser accesible desde db.js y app.js
+var supabase = null;
 
-    try {
+try {
+    if (typeof window.supabase !== 'undefined') {
         supabase = window.supabase.createClient(
             SUPABASE_CONFIG.url,
             SUPABASE_CONFIG.anonKey
         );
         console.log('✅ Supabase client initialized successfully');
-        return supabase;
-    } catch (error) {
-        console.error('❌ Error initializing Supabase:', error);
-        return null;
+        console.log('   URL:', SUPABASE_CONFIG.url);
     }
-}
-
-// Auto-inicializar cuando se carga el script
-if (typeof window !== 'undefined') {
-    window.addEventListener('DOMContentLoaded', () => {
-        initSupabase();
-    });
+} catch (error) {
+    console.error('❌ Error initializing Supabase client:', error);
 }

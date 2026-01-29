@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS students (
   name TEXT NOT NULL,
   email TEXT,
   phone TEXT,
+  level DECIMAL(2,1) CHECK (level >= 0 AND level <= 5),
   registered_date TIMESTAMPTZ DEFAULT NOW()
 );
 

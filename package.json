@@ -8,10 +8,13 @@
     "migrate": "echo 'Abre migrate.html en tu navegador para migrar datos'"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.93.3"
   },
-  "devDependencies": {},
-  "keywords": ["padel", "management", "supabase"],
+  "keywords": [
+    "padel",
+    "management",
+    "supabase"
+  ],
   "author": "",
   "license": "ISC"
 }

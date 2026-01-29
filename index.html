@@ -9,9 +9,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
-    <!-- Supabase Client Library -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body>
@@ -365,10 +362,15 @@
     <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <!-- Scripts: Load order is important -->
-    <script src="config.js"></script>
-    <script src="db.js"></script>
-    <script src="app.js"></script>
+    <!-- Scripts: Load order is CRITICAL -->
+    <!-- 1. First load Supabase library from local node_modules -->
+    <script src="node_modules/@supabase/supabase-js/dist/umd/supabase.js"></script>
+    <!-- 2. Then initialize Supabase client with detailed logging -->
+    <script src="supabase-init.js?v=6"></script>
+    <!-- 3. Then load database layer -->
+    <script src="db.js?v=6"></script>
+    <!-- 4. Finally load app logic -->
+    <script src="app.js?v=6"></script>
 </body>
 
 </html>
