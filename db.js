@@ -138,6 +138,7 @@ const db = {
                     name: student.name,
                     email: student.email,
                     phone: student.phone,
+                    level: student.level,
                     registered_date: student.registeredDate || new Date().toISOString()
                 }])
                 .select()
@@ -353,6 +354,7 @@ const db = {
             name: dbStudent.name,
             email: dbStudent.email,
             phone: dbStudent.phone,
+            level: dbStudent.level,
             registeredDate: dbStudent.registered_date
         };
     },

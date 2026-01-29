@@ -556,6 +556,10 @@ function createClassCard(cls) {
 
 function renderStudentsList() {
     const container = document.getElementById('studentsList');
+    if (!container) {
+        console.warn('renderStudentsList: element #studentsList not found');
+        return;
+    }
     container.innerHTML = '';
 
     if (appState.students.length === 0) {
@@ -589,6 +593,10 @@ function renderStudentsList() {
 
 function renderStudentsSelector() {
     const container = document.getElementById('studentsSelector');
+    if (!container) {
+        console.warn('renderStudentsSelector: element #studentsSelector not found');
+        return;
+    }
     container.innerHTML = '';
 
     if (appState.students.length === 0) {
@@ -1144,83 +1152,102 @@ async function editMonitor(monitorId) {
 // ==========================================
 
 function initializeEventListeners() {
+    function getEl(id) {
+        const el = document.getElementById(id);
+        if (!el) console.warn(`initializeEventListeners: element not found: ${id}`);
+        return el;
+    }
     // Student modal
-    document.getElementById('addStudentBtn').addEventListener('click', () => {
-        document.getElementById('studentForm').reset();
+    const addStudentBtn = getEl('addStudentBtn');
+    if (addStudentBtn) addStudentBtn.addEventListener('click', () => {
+        const form = getEl('studentForm');
+        if (form) form.reset();
         openModal('studentModal');
     });
 
-    document.getElementById('closeStudentModal').addEventListener('click', () => {
-        closeModal('studentModal');
-    });
+    const closeStudentModalBtn = getEl('closeStudentModal');
+    if (closeStudentModalBtn) closeStudentModalBtn.addEventListener('click', () => closeModal('studentModal'));
 
-    document.getElementById('cancelStudentBtn').addEventListener('click', () => {
-        closeModal('studentModal');
-    });
+    const cancelStudentBtn = getEl('cancelStudentBtn');
+    if (cancelStudentBtn) cancelStudentBtn.addEventListener('click', () => closeModal('studentModal'));
 
-    document.getElementById('studentForm').addEventListener('submit', handleStudentFormSubmit);
+    const studentFormEl = getEl('studentForm');
+    if (studentFormEl) studentFormEl.addEventListener('submit', handleStudentFormSubmit);
 
     // Class modal
-    document.getElementById('addClassBtn').addEventListener('click', () => {
+    const addClassBtn = getEl('addClassBtn');
+    if (addClassBtn) addClassBtn.addEventListener('click', () => {
         appState.selectedClass = null;
         openAddClassModal();
     });
 
-    document.getElementById('closeClassModal').addEventListener('click', () => {
+    const closeClassModalBtn = getEl('closeClassModal');
+    if (closeClassModalBtn) closeClassModalBtn.addEventListener('click', () => {
         closeModal('classModal');
         appState.selectedClass = null;
     });
 
-    document.getElementById('cancelClassBtn').addEventListener('click', () => {
+    const cancelClassBtnEl = getEl('cancelClassBtn');
+    if (cancelClassBtnEl) cancelClassBtnEl.addEventListener('click', () => {
         closeModal('classModal');
         appState.selectedClass = null;
     });
 
-    document.getElementById('classForm').addEventListener('submit', handleClassFormSubmit);
+    const classFormEl = getEl('classForm');
+    if (classFormEl) classFormEl.addEventListener('submit', handleClassFormSubmit);
 
     // Class details modal
-    document.getElementById('closeClassDetailsModal').addEventListener('click', () => {
-        closeModal('classDetailsModal');
-    });
+    const closeClassDetailsBtn = getEl('closeClassDetailsModal');
+    if (closeClassDetailsBtn) closeClassDetailsBtn.addEventListener('click', () => closeModal('classDetailsModal'));
 
-    document.getElementById('editClassBtn').addEventListener('click', () => {
+    const editClassBtnEl = getEl('editClassBtn');
+    if (editClassBtnEl) editClassBtnEl.addEventListener('click', () => {
         const classId = appState.selectedClass;
         closeModal('classDetailsModal');
         openEditClassModal(classId);
     });
 
-    document.getElementById('deleteClassBtn').addEventListener('click', async () => {
+    const deleteClassBtnEl = getEl('deleteClassBtn');
+    if (deleteClassBtnEl) deleteClassBtnEl.addEventListener('click', async () => {
         if (confirm('¿Estás seguro de eliminar esta clase?')) {
             await deleteClass(appState.selectedClass);
             closeModal('classDetailsModal');
         }
     });
 
-    document.getElementById('toggleCompletedBtn').addEventListener('click', () => {
-        toggleClassCompleted(appState.selectedClass);
-    });
+    const toggleCompletedBtnEl = getEl('toggleCompletedBtn');
+    if (toggleCompletedBtnEl) toggleCompletedBtnEl.addEventListener('click', () => toggleClassCompleted(appState.selectedClass));
 
     // Week navigation
-    document.getElementById('prevWeekBtn').addEventListener('click', () => navigateWeek(-1));
-    document.getElementById('nextWeekBtn').addEventListener('click', () => navigateWeek(1));
-    document.getElementById('todayBtn').addEventListener('click', goToToday);
+    const prevWeekBtn = getEl('prevWeekBtn');
+    if (prevWeekBtn) prevWeekBtn.addEventListener('click', () => navigateWeek(-1));
+    const nextWeekBtn = getEl('nextWeekBtn');
+    if (nextWeekBtn) nextWeekBtn.addEventListener('click', () => navigateWeek(1));
+    const todayBtnEl = getEl('todayBtn');
+    if (todayBtnEl) todayBtnEl.addEventListener('click', goToToday);
 
     // Sidebar toggle
-    document.getElementById('toggleSidebarBtn').addEventListener('click', () => {
-        document.getElementById('sidebar').classList.toggle('active');
+    const toggleSidebarBtnEl = getEl('toggleSidebarBtn');
+    if (toggleSidebarBtnEl) toggleSidebarBtnEl.addEventListener('click', () => {
+        const sidebarEl = getEl('sidebar');
+        if (sidebarEl) sidebarEl.classList.toggle('active');
     });
 
-    document.getElementById('closeSidebarBtn').addEventListener('click', () => {
-        document.getElementById('sidebar').classList.remove('active');
-    });
+    const closeSidebarBtnEl = getEl('closeSidebarBtn');
+    if (closeSidebarBtnEl) {
+        const sidebarEl = getEl('sidebar');
+        closeSidebarBtnEl.addEventListener('click', () => { if (sidebarEl) sidebarEl.classList.remove('active'); });
+    }
 
     // Student search
-    document.getElementById('studentSearch').addEventListener('input', (e) => {
+    const studentSearchEl = getEl('studentSearch');
+    if (studentSearchEl) studentSearchEl.addEventListener('input', (e) => {
         const search = e.target.value.toLowerCase();
         const studentCards = document.querySelectorAll('.student-card');
 
         studentCards.forEach(card => {
-            const name = card.querySelector('h4').textContent.toLowerCase();
+            const nameEl = card.querySelector('h4');
+            const name = nameEl ? nameEl.textContent.toLowerCase() : '';
             card.style.display = name.includes(search) ? 'block' : 'none';
         });
     });
