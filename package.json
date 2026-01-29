@@ -1,0 +1,17 @@
+{
+  "name": "padel-class-management",
+  "version": "1.0.0",
+  "description": "Aplicación de gestión de clases de pádel",
+  "main": "app.js",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "migrate": "echo 'Abre migrate.html en tu navegador para migrar datos'"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {},
+  "keywords": ["padel", "management", "supabase"],
+  "author": "",
+  "license": "ISC"
+}

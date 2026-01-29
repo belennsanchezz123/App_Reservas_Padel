@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestión de Clases de Pádel</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Supabase Client Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+
+<body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <p class="loading-text">Cargando datos...</p>
+    </div>
+
+    <!-- Login Screen -->
+    <div class="login-screen" id="loginScreen">
+        <div class="login-container">
+            <div class="login-header">
+                <div class="login-logo">🎾</div>
+                <h1>PadelPro Manager</h1>
+                <p>Selecciona tu rol para continuar</p>
+            </div>
+            <div class="login-roles">
+                <div class="role-card" onclick="login('coordinator')">
+                    <div class="role-icon">👔</div>
+                    <h2>Coordinador</h2>
+                    <p>Gestiona monitores y visualiza todas las clases</p>
+                </div>
+                <div class="role-card" onclick="showMonitorLogin()">
+                    <div class="role-icon">🎾</div>
+                    <h2>Monitor</h2>
+                    <p>Gestiona tus propias clases y alumnos</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo-section">
+                <div class="logo-icon">🎾</div>
+                <h1 class="app-title">PadelPro Manager</h1>
+            </div>
+            <div class="header-actions">
+                <span id="userDisplay" class="user-display"></span>
+                <button class="btn btn-secondary btn-sm" onclick="logout()">
+                    <span class="btn-icon">�</span>
+                    Cerrar Sesión
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-container">
+        <!-- Coordinator Dashboard -->
+        <section class="coordinator-dashboard" id="coordinatorDashboard" style="display: none;">
+            <div class="dashboard-header">
+                <h2>👔 Panel de Coordinador</h2>
+                <button class="btn btn-primary" onclick="openAddMonitorModal()">
+                    <span class="btn-icon">+</span>
+                    Nuevo Monitor
+                </button>
+            </div>
+            <div class="monitors-grid" id="monitorsList">
+                <!-- Monitors will be injected here -->
+            </div>
+        </section>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>Alumnos</h2>
+                <button class="btn-icon-only" id="closeSidebarBtn">✕</button>
+            </div>
+            <button class="btn btn-primary" id="addStudentBtn" style="width: 100%; margin-bottom: var(--spacing-md);">
+                <span class="btn-icon">+</span>
+                Nuevo Alumno
+            </button>
+            <div class="search-box">
+                <input type="text" id="studentSearch" placeholder="Buscar alumno...">
+            </div>
+            <div class="students-list" id="studentsList">
+                <!-- Students will be injected here -->
+            </div>
+        </aside>
+
+        <!-- Calendar Section (Monitor View) -->
+        <div id="calendarSectionContainer" style="flex: 1;">
+            <section class="calendar-section">
+                <!-- Week Navigation -->
+                <div class="week-navigation">
+                    <button class="btn btn-secondary" id="prevWeekBtn">
+                        <span class="btn-icon">←</span>
+                        Semana Anterior
+                    </button>
+                    <div class="week-info">
+                        <h2 id="weekTitle">Semana del 13 - 19 Enero 2026</h2>
+                        <button class="btn btn-sm" id="todayBtn">Hoy</button>
+                    </div>
+                    <button class="btn btn-secondary" id="nextWeekBtn">
+                        Semana Siguiente
+                        <span class="btn-icon">→</span>
+                    </button>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="quick-actions">
+                    <button class="btn btn-primary" id="addClassBtn">
+                        <span class="btn-icon">+</span>
+                        Nueva Clase
+                    </button>
+                    <button class="btn btn-secondary" id="toggleSidebarBtn">
+                        <span class="btn-icon">👥</span>
+                        Ver Alumnos
+                    </button>
+                </div>
+
+                <!-- Calendar Grid -->
+                <div class="calendar-container">
+                    <div class="calendar-grid" id="calendarGrid">
+                        <!-- Time column -->
+                        <div class="time-column">
+                            <div class="time-header">Hora</div>
+                            <!-- Time slots will be injected here -->
+                        </div>
+                        <!-- Day columns will be injected here -->
+                    </div>
+                </div>
+
+                <!-- Legend -->
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color class-full"></div>
+                        <span>Clase Completa (4/4)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color class-partial"></div>
+                        <span>Clase Parcial (1-3/4)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color class-empty"></div>
+                        <span>Sin Clase</span>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Modal: Add/Edit Class -->
+    <div class="modal" id="classModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="classModalTitle">Nueva Clase</h3>
+                <button class="btn-close" id="closeClassModal">✕</button>
+            </div>
+            <form id="classForm">
+                <div class="form-group">
+                    <label for="classDay">Día de la semana</label>
+                    <select id="classDay" required>
+                        <option value="">Seleccionar día</option>
+                        <option value="Lunes">Lunes</option>
+                        <option value="Martes">Martes</option>
+                        <option value="Miércoles">Miércoles</option>
+                        <option value="Jueves">Jueves</option>
+                        <option value="Viernes">Viernes</option>
+                        <option value="Sábado">Sábado</option>
+                        <option value="Domingo">Domingo</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="classStartTime">Hora de inicio</label>
+                        <div style="display: flex; gap: var(--spacing-sm);">
+                            <select id="classStartHour" required style="flex: 1;">
+                                <option value="">HH</option>
+                                <option value="06">06</option>
+                                <option value="07">07</option>
+                                <option value="08">08</option>
+                                <option value="09">09</option>
+                                <option value="10">10</option>
+                                <option value="11">11</option>
+                                <option value="12">12</option>
+                                <option value="13">13</option>
+                                <option value="14">14</option>
+                                <option value="15">15</option>
+                                <option value="16">16</option>
+                                <option value="17">17</option>
+                                <option value="18">18</option>
+                                <option value="19">19</option>
+                                <option value="20">20</option>
+                                <option value="21">21</option>
+                                <option value="22">22</option>
+                            </select>
+                            <select id="classStartMinute" required style="flex: 1;">
+                                <option value="">MM</option>
+                                <option value="00">00</option>
+                                <option value="15">15</option>
+                                <option value="30">30</option>
+                                <option value="45">45</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="classEndTime">Hora de fin</label>
+                        <div style="display: flex; gap: var(--spacing-sm);">
+                            <select id="classEndHour" required style="flex: 1;">
+                                <option value="">HH</option>
+                                <option value="06">06</option>
+                                <option value="07">07</option>
+                                <option value="08">08</option>
+                                <option value="09">09</option>
+                                <option value="10">10</option>
+                                <option value="11">11</option>
+                                <option value="12">12</option>
+                                <option value="13">13</option>
+                                <option value="14">14</option>
+                                <option value="15">15</option>
+                                <option value="16">16</option>
+                                <option value="17">17</option>
+                                <option value="18">18</option>
+                                <option value="19">19</option>
+                                <option value="20">20</option>
+                                <option value="21">21</option>
+                                <option value="22">22</option>
+                            </select>
+                            <select id="classEndMinute" required style="flex: 1;">
+                                <option value="">MM</option>
+                                <option value="00">00</option>
+                                <option value="15">15</option>
+                                <option value="30">30</option>
+                                <option value="45">45</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Alumnos (máx. 4)</label>
+                    <div class="students-selector" id="studentsSelector">
+                        <!-- Student checkboxes will be injected here -->
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelClassBtn">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Clase</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Add/Edit Student -->
+    <div class="modal" id="studentModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="studentModalTitle">Nuevo Alumno</h3>
+                <button class="btn-close" id="closeStudentModal">✕</button>
+            </div>
+            <form id="studentForm">
+                <div class="form-group">
+                    <label for="studentName">Nombre completo</label>
+                    <input type="text" id="studentName" placeholder="Ej: Juan Pérez García" required>
+                </div>
+                <div class="form-group">
+                    <label for="studentEmail">Email</label>
+                    <input type="email" id="studentEmail" placeholder="juan@example.com">
+                </div>
+                <div class="form-group">
+                    <label for="studentPhone">Teléfono</label>
+                    <input type="tel" id="studentPhone" placeholder="666 123 456">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelStudentBtn">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Alumno</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Class Details -->
+    <div class="modal" id="classDetailsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Detalles de la Clase</h3>
+                <button class="btn-close" id="closeClassDetailsModal">✕</button>
+            </div>
+            <div class="class-details-content" id="classDetailsContent">
+                <!-- Class details will be injected here -->
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="toggleCompletedBtn">
+                    <span class="btn-icon">✓</span>
+                    Marcar como Cerrada
+                </button>
+                <button class="btn btn-danger" id="deleteClassBtn">Eliminar Clase</button>
+                <button class="btn btn-primary" id="editClassBtn">Editar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Add Monitor -->
+    <div class="modal" id="monitorModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="monitorModalTitle">Nuevo Monitor</h3>
+                <button class="btn-close" id="closeMonitorModal">✕</button>
+            </div>
+            <form id="monitorForm" onsubmit="handleMonitorFormSubmit(event)">
+                <div class="form-group">
+                    <label for="monitorName">Nombre completo</label>
+                    <input type="text" id="monitorName" placeholder="Ej: Carlos Ruiz" required>
+                </div>
+                <div class="form-group">
+                    <label for="monitorEmail">Email</label>
+                    <input type="email" id="monitorEmail" placeholder="carlos@example.com">
+                </div>
+                <div class="form-group">
+                    <label for="monitorPhone">Teléfono</label>
+                    <input type="tel" id="monitorPhone" placeholder="666 123 456">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeMonitorModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Monitor</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Monitor Login (Select Monitor) -->
+    <div class="modal" id="monitorLoginModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Ingresar como Monitor</h3>
+                <button class="btn-close" onclick="closeMonitorLoginModal()">✕</button>
+            </div>
+            <div style="padding: var(--spacing-lg);">
+                <div class="form-group">
+                    <label>Selecciona tu nombre o crea uno nuevo:</label>
+                    <select id="monitorSelect"
+                        style="width: 100%; padding: var(--spacing-sm); margin-bottom: var(--spacing-md); border: 2px solid var(--gray-200); border-radius: var(--radius-md);">
+                        <option value="">--- Nuevo Monitor ---</option>
+                    </select>
+                </div>
+                <div class="form-group" id="newMonitorNameGroup">
+                    <label for="newMonitorName">Nombre del nuevo monitor:</label>
+                    <input type="text" id="newMonitorName" placeholder="Tu nombre">
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" onclick="closeMonitorLoginModal()">Cancelar</button>
+                    <button class="btn btn-primary" onclick="handleMonitorLogin()">Iniciar Sesión</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts: Load order is important -->
+    <script src="config.js"></script>
+    <script src="db.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Migración de Datos - Padel App</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 3rem;
+            max-width: 800px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 0.5rem;
+            font-size: 2rem;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 2rem;
+        }
+
+        .step {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+            border-left: 4px solid #667eea;
+        }
+
+        .step h3 {
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+
+        .step p {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .status {
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+            font-weight: 600;
+        }
+
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+
+        .status.warning {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 1rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .data-preview {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .progress {
+            background: #e0e0e0;
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+
+        .progress-bar {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        code {
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🎾 Migración de Datos</h1>
+        <p class="subtitle">Transfiere tus datos de LocalStorage a Supabase</p>
+
+        <div class="step">
+            <h3>Paso 1: Verificar Configuración</h3>
+            <p>Asegúrate de haber configurado correctamente <code>config.js</code> con tus credenciales de Supabase.</p>
+        </div>
+
+        <div class="step">
+            <h3>Paso 2: Revisar Datos</h3>
+            <p>Revisa los datos que se migrarán desde tu LocalStorage.</p>
+        </div>
+
+        <div id="status" class="status info">
+            ℹ️ Haz clic en "Iniciar Migración" para comenzar
+        </div>
+
+        <div class="progress">
+            <div id="progressBar" class="progress-bar"></div>
+        </div>
+
+        <div id="dataPreview" class="data-preview" style="display: none;"></div>
+
+        <button id="migrateBtn" class="btn" onclick="startMigration()">
+            🚀 Iniciar Migración
+        </button>
+
+        <button id="viewDataBtn" class="btn" onclick="previewData()" style="background: #6c757d; margin-top: 0.5rem;">
+            👁️ Ver Datos Actuales
+        </button>
+    </div>
+
+    <!-- Incluir Supabase desde CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Incluir la configuración -->
+    <script src="config.js"></script>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        const progressBar = document.getElementById('progressBar');
+        const migrateBtn = document.getElementById('migrateBtn');
+        const dataPreview = document.getElementById('dataPreview');
+
+        function updateStatus(message, type = 'info') {
+            statusDiv.className = `status ${type}`;
+            statusDiv.innerHTML = message;
+        }
+
+        function updateProgress(percent) {
+            progressBar.style.width = percent + '%';
+        }
+
+        function previewData() {
+            const students = JSON.parse(localStorage.getItem('padelApp_students') || '[]');
+            const classes = JSON.parse(localStorage.getItem('padelApp_classes') || '[]');
+            const monitors = JSON.parse(localStorage.getItem('padelApp_monitors') || '[]');
+
+            const preview = `
+📊 DATOS EN LOCALSTORAGE:
+
+👥 Monitores: ${monitors.length}
+${monitors.map(m => `  - ${m.name}`).join('\n') || '  (ninguno)'}
+
+🎾 Estudiantes: ${students.length}
+${students.map(s => `  - ${s.name}`).join('\n') || '  (ninguno)'}
+
+📅 Clases: ${classes.length}
+${classes.map(c => `  - ${c.day} ${c.startTime}-${c.endTime} (${c.students.length} alumnos)`).join('\n') || '  (ninguna)'}
+            `;
+
+            dataPreview.textContent = preview;
+            dataPreview.style.display = 'block';
+        }
+
+        async function startMigration() {
+            try {
+                migrateBtn.disabled = true;
+                updateStatus('🔄 Iniciando migración...', 'info');
+                updateProgress(0);
+
+                // Verificar Supabase
+                if (!supabase) {
+                    throw new Error('Supabase no está configurado. Verifica config.js');
+                }
+
+                updateStatus('✅ Conexión a Supabase establecida', 'success');
+                updateProgress(10);
+
+                // Leer datos de LocalStorage
+                const students = JSON.parse(localStorage.getItem('padelApp_students') || '[]');
+                const classes = JSON.parse(localStorage.getItem('padelApp_classes') || '[]');
+                const monitors = JSON.parse(localStorage.getItem('padelApp_monitors') || '[]');
+
+                updateStatus(`📦 Datos encontrados: ${monitors.length} monitores, ${students.length} estudiantes, ${classes.length} clases`, 'info');
+                updateProgress(20);
+
+                // Migrar Monitores
+                if (monitors.length > 0) {
+                    updateStatus('🔄 Migrando monitores...', 'info');
+
+                    const monitorsToInsert = monitors.map(m => ({
+                        id: m.id,
+                        name: m.name,
+                        email: m.email || '',
+                        phone: m.phone || '',
+                        role: m.role || 'monitor',
+                        created_date: m.createdDate || new Date().toISOString()
+                    }));
+
+                    const { error: monitorsError } = await supabase
+                        .from('monitors')
+                        .insert(monitorsToInsert);
+
+                    if (monitorsError) {
+                        console.error('Error migrando monitores:', monitorsError);
+                        throw new Error(`Error al migrar monitores: ${monitorsError.message}`);
+                    }
+
+                    updateStatus(`✅ ${monitors.length} monitores migrados`, 'success');
+                }
+                updateProgress(40);
+
+                // Migrar Estudiantes
+                if (students.length > 0) {
+                    updateStatus('🔄 Migrando estudiantes...', 'info');
+
+                    const studentsToInsert = students.map(s => ({
+                        id: s.id,
+                        name: s.name,
+                        email: s.email || '',
+                        phone: s.phone || '',
+                        registered_date: s.registeredDate || new Date().toISOString()
+                    }));
+
+                    const { error: studentsError } = await supabase
+                        .from('students')
+                        .insert(studentsToInsert);
+
+                    if (studentsError) {
+                        console.error('Error migrando estudiantes:', studentsError);
+                        throw new Error(`Error al migrar estudiantes: ${studentsError.message}`);
+                    }
+
+                    updateStatus(`✅ ${students.length} estudiantes migrados`, 'success');
+                }
+                updateProgress(70);
+
+                // Migrar Clases
+                if (classes.length > 0) {
+                    updateStatus('🔄 Migrando clases...', 'info');
+
+                    const classesToInsert = classes.map(c => ({
+                        id: c.id,
+                        day: c.day,
+                        date: c.date,
+                        start_time: c.startTime,
+                        end_time: c.endTime,
+                        students: c.students || [],
+                        max_capacity: c.maxCapacity || 4,
+                        status: c.status || 'active',
+                        is_completed: c.isCompleted || false,
+                        monitor_id: c.monitorId || null,
+                        monitor_name: c.monitorName || null
+                    }));
+
+                    const { error: classesError } = await supabase
+                        .from('classes')
+                        .insert(classesToInsert);
+
+                    if (classesError) {
+                        console.error('Error migrando clases:', classesError);
+                        throw new Error(`Error al migrar clases: ${classesError.message}`);
+                    }
+
+                    updateStatus(`✅ ${classes.length} clases migradas`, 'success');
+                }
+                updateProgress(90);
+
+                // Completado
+                updateProgress(100);
+                updateStatus(`
+                    🎉 ¡Migración completada con éxito!<br><br>
+                    ✅ ${monitors.length} monitores<br>
+                    ✅ ${students.length} estudiantes<br>
+                    ✅ ${classes.length} clases<br><br>
+                    Ahora puedes usar la aplicación principal con Supabase.
+                `, 'success');
+
+                migrateBtn.textContent = '✅ Migración Completada';
+
+            } catch (error) {
+                console.error('Error en la migración:', error);
+                updateStatus(`❌ Error: ${error.message}`, 'error');
+                updateProgress(0);
+                migrateBtn.disabled = false;
+            }
+        }
+    </script>
+</body>
+
+</html>
