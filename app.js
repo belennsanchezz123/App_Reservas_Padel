@@ -22,6 +22,20 @@ const CONFIG = {
     snapMinutes: 15,
 };
 
+window.addEventListener('DOMContentLoaded', () => {
+    const calendarGrid = document.getElementById('calendarGrid');
+    if (!calendarGrid) {
+        console.error('calendarGrid not found. Ensure the element with id "calendarGrid" exists in the HTML.');
+        return;
+    }
+
+    calendarGrid.addEventListener('dragend', (event) => {
+        const changedDay = 'Nuevo Día'; // Lógica para obtener el nuevo día
+        const changedTime = 'Nueva Hora'; // Lógica para obtener la nueva hora
+        showConfirmChangesModal(changedDay, changedTime);
+    });
+});
+
 // ==========================================
 // UTILITY FUNCTIONS
 // ==========================================
@@ -87,6 +101,10 @@ function hideLoading() {
     if (overlay) {
         overlay.classList.add('hidden');
     }
+}
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    sidebar.classList.toggle('open');
 }
 
 // ==========================================
@@ -1500,6 +1518,10 @@ function goToToday() {
 
 function showToast(message, type = 'success') {
     const container = document.getElementById('toastContainer');
+    if (!container) {
+        console.error('Toast container not found. Ensure the element with id "toastContainer" exists in the HTML.');
+        return;
+    }
 
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;

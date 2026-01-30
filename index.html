@@ -84,6 +84,7 @@
                 <span class="btn-icon">+</span>
                 Nuevo Alumno
             </button>
+            <button class="btn btn-primary" id="toggleSidebarBtn" onclick="toggleSidebar()">Ver Alumnos</button>
             <div class="search-box">
                 <input type="text" id="studentSearch" placeholder="Buscar alumno...">
             </div>
@@ -392,6 +393,44 @@
                     <button type="submit" class="btn btn-primary">Guardar</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal: Save Changes -->
+    <div class="modal" id="saveChangesModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Guardar Cambios</h3>
+                <button class="btn-close" onclick="closeSaveChangesModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>¿Deseas guardar los cambios realizados?</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="discardChanges()">Descartar</button>
+                <button class="btn btn-primary" onclick="saveChanges()">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Confirm Changes -->
+    <div class="modal" id="confirmChangesModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Confirmar Cambios</h3>
+                <button class="btn-close" onclick="closeConfirmChangesModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>Has realizado los siguientes cambios:</p>
+                <ul>
+                    <li><strong>Día:</strong> <span id="changedDay"></span></li>
+                    <li><strong>Hora:</strong> <span id="changedTime"></span></li>
+                </ul>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="discardChanges()">Descartar</button>
+                <button class="btn btn-primary" onclick="saveChanges()">Guardar</button>
+            </div>
         </div>
     </div>
 
