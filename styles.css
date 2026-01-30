@@ -2,6 +2,8 @@
    CSS VARIABLES & DESIGN SYSTEM
    ========================================== */
 :root {
+    /* Slot height used by calendar - keep in sync with JS calculations */
+    --slot-height: 60px;
     /* Colors - Padel Theme */
     --primary-green: #10b981;
     --primary-green-dark: #059669;
@@ -429,6 +431,72 @@ body {
     gap: var(--spacing-md);
     margin-bottom: var(--spacing-lg);
     flex-wrap: wrap;
+    position: relative;
+}
+
+/* Students dropdown */
+.students-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 340px;
+    background: white;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    z-index: 5000;
+    overflow: hidden;
+}
+
+.students-dropdown .dropdown-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-bottom: 1px solid var(--gray-100);
+}
+
+.students-dropdown .dropdown-header h3 {
+    margin: 0;
+    font-size: var(--font-size-base);
+    color: var(--gray-900);
+}
+
+.students-dropdown .dropdown-search {
+    padding: var(--spacing-sm);
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.students-dropdown .dropdown-search input {
+    width: 100%;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+}
+
+.students-dropdown-list {
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.students-dropdown-item {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-bottom: 1px solid var(--gray-100);
+    cursor: pointer;
+}
+
+.students-dropdown-item:hover {
+    background: var(--gray-50);
+}
+
+.students-dropdown-item .meta { font-size: 0.85rem; color: var(--gray-600); }
+
+/* Make quick-actions a positioning context for the dropdown */
+/* small layout tweak for quick-actions */
+.quick-actions {
+    display: flex;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+    flex-wrap: wrap;
 }
 
 /* ==========================================
@@ -477,7 +545,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 60px;
+    height: var(--slot-height);
     font-weight: 500;
 }
 
@@ -508,7 +576,7 @@ body {
 
 .calendar-cell {
     background: white;
-    min-height: 60px;
+    height: var(--slot-height);
     position: relative;
     cursor: pointer;
     transition: background var(--transition-fast);
@@ -527,14 +595,10 @@ body {
    CLASS CARDS IN CALENDAR
    ========================================== */
 .class-card {
-    padding: var(--spacing-sm);
+    padding: 0.35rem 0.5rem;
     border-radius: var(--radius-sm);
-    font-size: var(--font-size-sm);
-    min-height: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: var(--spacing-xs);
+    font-size: 0.9rem;
+    display: block;
     position: absolute;
     top: 0;
     left: 0;
@@ -560,6 +624,46 @@ body {
     box-shadow: var(--shadow-md);
 }
 
+/* Resize handle for adjusting class duration */
+.class-card .resize-handle {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 10px;
+    bottom: 0;
+    cursor: ns-resize;
+    background: linear-gradient(90deg, rgba(255,255,255,0.12), rgba(255,255,255,0.02));
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+    z-index: 3;
+}
+
+.class-card:hover .resize-handle {
+    opacity: 1;
+}
+
+/* Floating small panel shown after dragging with Save/Cancel actions */
+.drag-save-panel {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: var(--shadow-xl);
+    padding: 0.75rem;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    z-index: 20000;
+    min-width: 220px;
+}
+.drag-save-panel .label {
+    flex: 1;
+    font-size: 0.95rem;
+    color: var(--gray-800);
+}
+.drag-save-panel .actions { display: flex; gap: 0.5rem; }
+
 /* Class Status Colors */
 .class-full {
     background: linear-gradient(135deg, var(--status-full) 0%, var(--status-full-light) 100%);
@@ -577,18 +681,40 @@ body {
 }
 
 .class-card-time {
-    font-weight: 600;
-    font-size: var(--font-size-xs);
+    font-weight: 700;
+    font-size: 0.78rem;
+    position: absolute;
+    top: 6px;
+    left: 8px;
+    line-height: 1;
 }
 
 .class-card-occupancy {
-    font-weight: 700;
-    font-size: var(--font-size-base);
+    font-weight: 800;
+    font-size: 0.95rem;
+    position: absolute;
+    top: 70%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 4px 8px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.12);
+    color: white;
+    text-align: center;
+    line-height: 1;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
 }
 
 .class-card-students {
-    font-size: var(--font-size-xs);
-    opacity: 0.9;
+    font-size: 0.82rem;
+    opacity: 0.95;
+    position: absolute;
+    bottom: 6px;
+    left: 8px;
+    right: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* ==========================================
@@ -773,6 +899,28 @@ form {
     cursor: pointer;
     flex: 1;
     font-weight: 400;
+}
+
+/* Selected students area in class modal */
+.selected-students {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.student-pill {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    padding: 0.35rem 0.6rem;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.student-search-item button.btn {
+    white-space: nowrap;
 }
 
 /* ==========================================

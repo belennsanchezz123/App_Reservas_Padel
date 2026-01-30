@@ -276,6 +276,7 @@ const db = {
             return data;
         } catch (error) {
             console.error('Error creating class:', error);
+            try { console.error('Error details:', JSON.stringify(error, null, 2)); } catch (e) {}
             throw error;
         }
     },
@@ -306,6 +307,7 @@ const db = {
             return data;
         } catch (error) {
             console.error('Error updating class:', error);
+            try { console.error('Error details:', JSON.stringify(error, null, 2)); } catch (e) {}
             throw error;
         }
     },

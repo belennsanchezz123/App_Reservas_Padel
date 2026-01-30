@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS monitors (
 
 -- Tabla de Estudiantes
 CREATE TABLE IF NOT EXISTS students (
-  id TEXT PRIMARY KEY,
+  id NUMBER PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT,
   phone TEXT,
@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS classes (
   monitor_name TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE students 
+ADD COLUMN level DECIMAL(2,1) 
+CHECK (level >= 0 AND level <= 5);
 
 -- Índices para mejorar el rendimiento
 CREATE INDEX IF NOT EXISTS idx_classes_date ON classes(date);

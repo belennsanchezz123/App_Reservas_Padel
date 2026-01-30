@@ -15,9 +15,11 @@ const appState = {
 
 const CONFIG = {
     hoursStart: 8,
-    hoursEnd: 22,
+    hoursEnd: 23,
     maxStudentsPerClass: 4,
     days: ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'],
+    // Snap interval in minutes when dragging/resizing classes (can be 15 or 30)
+    snapMinutes: 15,
 };
 
 // ==========================================
@@ -51,6 +53,24 @@ function getDateForDay(weekStart, dayIndex) {
 
 function formatTime(time) {
     return time.padStart(5, '0');
+}
+
+function addMinutesToTime(time, minutesToAdd) {
+    const parts = time.split(':').map(n => parseInt(n, 10));
+    let h = parts[0] || 0;
+    let m = parts[1] || 0;
+    let total = h * 60 + m + minutesToAdd;
+    if (total < 0) total = 0;
+    const nh = Math.floor(total / 60) % 24;
+    const nm = total % 60;
+    return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`;
+}
+
+function minutesToTime(totalMinutes) {
+    if (totalMinutes < 0) totalMinutes = 0;
+    const hh = Math.floor(totalMinutes / 60) % 24;
+    const mm = totalMinutes % 60;
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
 function showLoading(message = 'Cargando...') {
@@ -151,6 +171,8 @@ async function addMonitor(name, email, phone) {
         if (isCoordinator()) {
             renderMonitorsList();
         }
+        // persist locally as fallback
+        saveToLocalStorage();
         return converted;
     } catch (error) {
         console.error('Error adding monitor:', error);
@@ -170,6 +192,7 @@ async function updateMonitor(monitorId, updates) {
         if (isCoordinator()) {
             renderMonitorsList();
         }
+        saveToLocalStorage();
         showToast('Monitor actualizado', 'success');
     } catch (error) {
         console.error('Error updating monitor:', error);
@@ -188,6 +211,7 @@ async function deleteMonitor(monitorId) {
             renderMonitorsList();
             renderCalendar();
         }
+        saveToLocalStorage();
         showToast('Monitor eliminado', 'success');
     } catch (error) {
         console.error('Error deleting monitor:', error);
@@ -241,6 +265,7 @@ async function addStudent(name, email, phone, level = null) {
 
         renderStudentsList();
         renderStudentsSelector();
+        saveToLocalStorage();
         showToast('Alumno agregado correctamente', 'success');
         return converted;
     } catch (error) {
@@ -263,10 +288,35 @@ async function deleteStudent(studentId) {
         renderStudentsList();
         renderStudentsSelector();
         renderCalendar();
+        saveToLocalStorage();
         showToast('Alumno eliminado', 'success');
     } catch (error) {
         console.error('Error deleting student:', error);
         showToast('Error al eliminar alumno', 'error');
+    }
+}
+
+async function updateStudent(studentId, updates) {
+    try {
+        const result = await db.updateStudent(studentId, updates);
+        const converted = db.convertStudentFromDB(result);
+
+        const idx = appState.students.findIndex(s => s.id === studentId);
+        if (idx !== -1) appState.students[idx] = converted;
+
+        renderStudentsList();
+        renderStudentsSelector();
+        renderStudentsDropdown();
+        renderCalendar();
+
+        saveToLocalStorage();
+
+        showToast('Alumno actualizado', 'success');
+        return converted;
+    } catch (error) {
+        console.error('Error updating student:', error);
+        showToast('Error al actualizar alumno', 'error');
+        throw error;
     }
 }
 
@@ -314,13 +364,23 @@ async function addClass(day, startTime, endTime, studentIds) {
             monitorName,
         };
 
-        const result = await db.createClass(newClass);
-        const converted = db.convertClassFromDB(result);
-        appState.classes.push(converted);
-
-        renderCalendar();
-        showToast('Clase creada correctamente', 'success');
-        return converted;
+        try {
+            const result = await db.createClass(newClass);
+            const converted = db.convertClassFromDB(result);
+            appState.classes.push(converted);
+            renderCalendar();
+            saveToLocalStorage();
+            showToast('Clase creada correctamente', 'success');
+            return converted;
+        } catch (dbError) {
+            console.warn('db.createClass falló, guardando localmente:', dbError);
+            // Fallback: persist clase localmente para desarrollo/offline
+            appState.classes.push(newClass);
+            renderCalendar();
+            saveToLocalStorage();
+            showToast('Clase guardada localmente (sin conexión)', 'warning');
+            return newClass;
+        }
     } catch (error) {
         console.error('Error adding class:', error);
         showToast('Error al crear clase', 'error');
@@ -330,15 +390,25 @@ async function addClass(day, startTime, endTime, studentIds) {
 
 async function updateClass(classId, updates) {
     try {
-        await db.updateClass(classId, updates);
-
-        const classIndex = appState.classes.findIndex(c => c.id === classId);
-        if (classIndex !== -1) {
-            appState.classes[classIndex] = { ...appState.classes[classIndex], ...updates };
+        try {
+            await db.updateClass(classId, updates);
+            const classIndex = appState.classes.findIndex(c => c.id === classId);
+            if (classIndex !== -1) {
+                appState.classes[classIndex] = { ...appState.classes[classIndex], ...updates };
+            }
+            renderCalendar();
+            saveToLocalStorage();
+            showToast('Clase actualizada', 'success');
+        } catch (dbError) {
+            console.warn('db.updateClass falló, aplicando cambio localmente:', dbError);
+            const classIndex = appState.classes.findIndex(c => c.id === classId);
+            if (classIndex !== -1) {
+                appState.classes[classIndex] = { ...appState.classes[classIndex], ...updates };
+            }
+            renderCalendar();
+            saveToLocalStorage();
+            showToast('Clase actualizada localmente (sin conexión)', 'warning');
         }
-
-        renderCalendar();
-        showToast('Clase actualizada', 'success');
     } catch (error) {
         console.error('Error updating class:', error);
         showToast('Error al actualizar clase', 'error');
@@ -347,12 +417,19 @@ async function updateClass(classId, updates) {
 
 async function deleteClass(classId) {
     try {
-        await db.deleteClass(classId);
-
-        appState.classes = appState.classes.filter(c => c.id !== classId);
-
-        renderCalendar();
-        showToast('Clase eliminada', 'success');
+        try {
+            await db.deleteClass(classId);
+            appState.classes = appState.classes.filter(c => c.id !== classId);
+            renderCalendar();
+            saveToLocalStorage();
+            showToast('Clase eliminada', 'success');
+        } catch (dbError) {
+            console.warn('db.deleteClass falló, eliminando localmente:', dbError);
+            appState.classes = appState.classes.filter(c => c.id !== classId);
+            renderCalendar();
+            saveToLocalStorage();
+            showToast('Clase eliminada localmente (sin conexión)', 'warning');
+        }
     } catch (error) {
         console.error('Error deleting class:', error);
         showToast('Error al eliminar clase', 'error');
@@ -430,12 +507,54 @@ async function loadAllData() {
 }
 
 // ==========================================
+// LOCAL STORAGE FALLBACK
+// ==========================================
+
+function saveToLocalStorage() {
+    try {
+        localStorage.setItem('padelApp_students', JSON.stringify(appState.students || []));
+        localStorage.setItem('padelApp_classes', JSON.stringify(appState.classes || []));
+        localStorage.setItem('padelApp_monitors', JSON.stringify(appState.monitors || []));
+        localStorage.setItem('padelApp_currentUser', JSON.stringify(appState.currentUser || null));
+    } catch (e) {
+        console.warn('saveToLocalStorage failed:', e);
+    }
+}
+
+function loadFromLocalStorage() {
+    try {
+        const students = localStorage.getItem('padelApp_students');
+        const classes = localStorage.getItem('padelApp_classes');
+        const monitors = localStorage.getItem('padelApp_monitors');
+        const savedUser = localStorage.getItem('padelApp_currentUser');
+
+        appState.students = students ? JSON.parse(students) : [];
+        appState.classes = classes ? JSON.parse(classes) : [];
+        appState.monitors = monitors ? JSON.parse(monitors) : [];
+        appState.currentUser = savedUser ? JSON.parse(savedUser) : null;
+    } catch (e) {
+        console.warn('loadFromLocalStorage failed:', e);
+        appState.students = appState.students || [];
+        appState.classes = appState.classes || [];
+        appState.monitors = appState.monitors || [];
+    }
+}
+
+// ==========================================
 // UI RENDERING
 // ==========================================
 
 function renderCalendar() {
     const grid = document.getElementById('calendarGrid');
+    if (!grid) {
+        console.warn('renderCalendar: element #calendarGrid not found');
+        return;
+    }
     grid.innerHTML = '';
+
+    if (!appState.currentWeekStart) {
+        appState.currentWeekStart = getMonday(new Date());
+    }
 
     renderTimeColumn(grid);
 
@@ -522,13 +641,20 @@ function createClassCard(cls) {
 
     const startTimeParts = cls.startTime.split(':');
     const endTimeParts = cls.endTime.split(':');
-    const startMinutes = parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
-    const endMinutes = parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
+    const startMinutes = parseInt(startTimeParts[0], 10) * 60 + parseInt(startTimeParts[1] || '0', 10);
+    const endMinutes = parseInt(endTimeParts[0], 10) * 60 + parseInt(endTimeParts[1] || '0', 10);
     const durationMinutes = endMinutes - startMinutes;
     const durationHours = durationMinutes / 60;
 
-    const cardHeight = (durationHours * 60) - 15;
-    card.style.minHeight = `${cardHeight}px`;
+    // Compute height based on CSS slot height variable so JS matches visual grid
+    const rootStyles = getComputedStyle(document.documentElement);
+    const slotHeightStr = rootStyles.getPropertyValue('--slot-height') || '60px';
+    const slotHeight = parseInt(slotHeightStr, 10) || 60;
+
+    let cardHeight = Math.round(durationHours * slotHeight) - 8;
+    if (cardHeight < 24) cardHeight = 24;
+    card.style.height = `${cardHeight}px`;
+    card.style.boxSizing = 'border-box';
 
     let monitorDisplay = '';
     if (isCoordinator() && cls.monitorName) {
@@ -538,13 +664,148 @@ function createClassCard(cls) {
     card.innerHTML = `
         <div class="class-card-time">${cls.startTime} - ${cls.endTime}</div>
         <div class="class-card-occupancy">${studentsCount}/${maxCapacity}</div>
-        <div class="class-card-students">
-            ${studentsCount === 0 ? 'Sin alumnos' :
-            studentsCount === 1 ? '1 alumno' :
-                `${studentsCount} alumnos`}
-        </div>
         ${monitorDisplay}
     `;
+
+    // Add resize handle for adjusting duration visually
+    const resizeHandle = document.createElement('div');
+    resizeHandle.className = 'resize-handle';
+    resizeHandle.title = 'Arrastrar para ajustar duración';
+    card.appendChild(resizeHandle);
+
+    // Resize logic: snap to 15 minutes
+    resizeHandle.addEventListener('mousedown', (startEvent) => {
+        startEvent.stopPropagation();
+        startEvent.preventDefault();
+
+        const rootStyles = getComputedStyle(document.documentElement);
+        const slotHeightStr = rootStyles.getPropertyValue('--slot-height') || '60px';
+        const slotHeight = parseInt(slotHeightStr, 10) || 60;
+        const pixelsPerMinute = slotHeight / 60;
+
+        const startRect = card.getBoundingClientRect();
+        const startY = startEvent.clientY;
+        const initialHeight = startRect.height;
+        const initialDurationMinutes = durationMinutes;
+
+        document.body.style.userSelect = 'none';
+
+        function onMouseMove(ev) {
+            const deltaY = ev.clientY - startY;
+            const deltaMinutes = Math.round((deltaY / pixelsPerMinute) / 15) * 15;
+            let newDuration = initialDurationMinutes + deltaMinutes;
+            if (newDuration < 15) newDuration = 15;
+
+            const newHeight = Math.round((newDuration / 60) * slotHeight) - 8;
+            card.style.height = `${newHeight}px`;
+        }
+
+        function onMouseUp(ev) {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            document.body.style.userSelect = '';
+
+            const deltaY = ev.clientY - startY;
+            const deltaMinutes = Math.round((deltaY / pixelsPerMinute) / 15) * 15;
+            let finalDuration = initialDurationMinutes + deltaMinutes;
+            if (finalDuration < 15) finalDuration = 15;
+
+            // Compute new end time and persist change
+            const newEndTime = addMinutesToTime(cls.startTime, finalDuration);
+
+            // Update class locally first for instant feedback and mark pending save
+            markClassPendingSave(cls.id, { endTime: newEndTime });
+        }
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
+
+    // Drag-to-move logic: change start time by dragging the card vertically and change day by dragging horizontally
+    card.addEventListener('mousedown', (startEvent) => {
+        // Ignore right-clicks and interactions that started on the resize handle
+        if (startEvent.button !== 0) return;
+        if (startEvent.target.closest('.resize-handle')) return;
+
+        startEvent.stopPropagation();
+        startEvent.preventDefault();
+
+        const rootStyles = getComputedStyle(document.documentElement);
+        const slotHeightStr = rootStyles.getPropertyValue('--slot-height') || '60px';
+        const slotHeight = parseInt(slotHeightStr, 10) || 60;
+        const pixelsPerMinute = slotHeight / 60;
+
+        // Estimate day column width
+        const sampleCell = document.querySelector('.calendar-cell');
+        const dayCellWidth = sampleCell ? sampleCell.getBoundingClientRect().width : 140;
+
+        const startY = startEvent.clientY;
+        const startX = startEvent.clientX;
+        const initialStartMinutes = startMinutes;
+        const initialEndMinutes = endMinutes;
+        const duration = durationMinutes;
+        const initialDayIndex = CONFIG.days.indexOf(cls.day);
+
+        let moved = false;
+
+        document.body.style.userSelect = 'none';
+        card.style.zIndex = 9999;
+
+        function onMouseMove(ev) {
+            const deltaY = ev.clientY - startY;
+            const deltaX = ev.clientX - startX;
+            if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) moved = true;
+            card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+        }
+
+        function onMouseUp(ev) {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            document.body.style.userSelect = '';
+            card.style.zIndex = '';
+            const deltaY = ev.clientY - startY;
+            const deltaX = ev.clientX - startX;
+
+            // Vertical: calculate delta minutes and snap to CONFIG.snapMinutes
+            const rawDeltaMinutes = Math.round(deltaY / pixelsPerMinute);
+            const snappedMinutes = Math.round(rawDeltaMinutes / CONFIG.snapMinutes) * CONFIG.snapMinutes;
+
+            let finalStart = initialStartMinutes + snappedMinutes;
+            // Clamp between allowed hours
+            const minStart = CONFIG.hoursStart * 60;
+            const maxStart = (CONFIG.hoursEnd * 60) - duration;
+            if (finalStart < minStart) finalStart = minStart;
+            if (finalStart > maxStart) finalStart = maxStart;
+
+            const finalEnd = finalStart + duration;
+
+            // Horizontal: compute day shift
+            const dayShift = Math.round(deltaX / dayCellWidth);
+            let finalDayIndex = initialDayIndex + dayShift;
+            if (finalDayIndex < 0) finalDayIndex = 0;
+            if (finalDayIndex > 6) finalDayIndex = 6;
+
+            const newStartTime = minutesToTime(finalStart);
+            const newEndTime = minutesToTime(finalEnd);
+            const newDay = CONFIG.days[finalDayIndex];
+            const newDate = getDateForDay(appState.currentWeekStart, finalDayIndex).toISOString();
+
+            // Reset visual transform
+            card.style.transform = '';
+
+            if (!moved) {
+                // treat as click - show details
+                showClassDetails(cls.id);
+                return;
+            }
+
+            // Update class locally first and mark pending save
+            markClassPendingSave(cls.id, { startTime: newStartTime, endTime: newEndTime, day: newDay, date: newDate });
+        }
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
 
     card.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -577,19 +838,113 @@ function renderStudentsList() {
             : '';
 
         card.innerHTML = `
-            <h4>${student.name} ${levelDisplay}</h4>
+            <div class="student-card-header">
+                <h4>${student.name} ${levelDisplay}</h4>
+                <div class="student-card-actions">
+                    <button class="btn-icon-sm" onclick="openEditStudentModal('${student.id}')" title="Editar">✏️</button>
+                    <button class="btn-icon-sm btn-danger-sm" onclick="confirmDeleteStudent('${student.id}')" title="Eliminar">🗑️</button>
+                </div>
+            </div>
             <p>${student.email || 'Sin email'}</p>
             <p>${student.phone || 'Sin teléfono'}</p>
             <div class="student-stats">${classCount} ${classCount === 1 ? 'clase' : 'clases'}</div>
         `;
 
-        card.addEventListener('click', () => {
-            showToast(`${student.name}: ${classCount} clases`, 'success');
-        });
-
         container.appendChild(card);
     });
 }
+
+function confirmDeleteStudent(studentId) {
+    const student = getStudentById(studentId);
+    if (!student) return;
+    const ok = confirm(`¿Eliminar alumno ${student.name}? Esta acción no se puede deshacer.`);
+    if (!ok) return;
+    deleteStudent(studentId);
+}
+
+// Render students into quick dropdown list
+function renderStudentsDropdown(filter = '') {
+    // Prefer modal list container, fallback to old dropdown id
+    const container = document.getElementById('studentsModalList') || document.getElementById('studentsDropdownList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const q = (filter || '').toLowerCase();
+    const list = appState.students.filter(s => s.name.toLowerCase().includes(q));
+
+    if (list.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.padding = '1rem';
+        empty.style.color = 'var(--gray-500)';
+        empty.textContent = 'No hay alumnos';
+        container.appendChild(empty);
+        return;
+    }
+
+    list.forEach(s => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'students-dropdown-item';
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.justifyContent = 'space-between';
+
+        const left = document.createElement('div');
+        left.style.display = 'flex';
+        left.style.alignItems = 'center';
+        left.style.gap = '0.75rem';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `dd-student-${s.id}`;
+        checkbox.value = s.id;
+
+        const label = document.createElement('label');
+        label.htmlFor = `dd-student-${s.id}`;
+        label.style.cursor = 'pointer';
+        label.innerHTML = `<strong style="display:block">${s.name}</strong><div class="meta">${s.email || ''}</div>`;
+
+        left.appendChild(checkbox);
+        left.appendChild(label);
+
+        const right = document.createElement('div');
+        if (s.level !== null && s.level !== undefined) {
+            const lvl = document.createElement('span');
+            lvl.className = 'level-badge';
+            lvl.textContent = s.level;
+            right.appendChild(lvl);
+        }
+
+        wrapper.appendChild(left);
+        wrapper.appendChild(right);
+
+        container.appendChild(wrapper);
+    });
+}
+
+function openEditStudentModal(studentId) {
+    const student = getStudentById(studentId);
+    if (!student) return;
+
+    const form = document.getElementById('studentForm');
+    if (!form) return;
+
+    // Prefill fields
+    document.getElementById('studentName').value = student.name || '';
+    document.getElementById('studentEmail').value = student.email || '';
+    document.getElementById('studentPhone').value = student.phone || '';
+    document.getElementById('studentLevel').value = student.level !== null && student.level !== undefined ? student.level : '';
+
+    appState.editingStudent = studentId;
+    const header = document.querySelector('#studentModal .modal-header h2');
+    if (header) header.textContent = 'Editar Alumno';
+    openModal('studentModal');
+
+    // Close dropdown
+    const modal = document.getElementById('studentsModal');
+    if (modal) closeModal('studentsModal');
+}
+
+// (No dropdown/modal renderer here — keep student rendering in `renderStudentsList` and `renderStudentsSelector`)
 
 function renderStudentsSelector() {
     const container = document.getElementById('studentsSelector');
@@ -597,30 +952,184 @@ function renderStudentsSelector() {
         console.warn('renderStudentsSelector: element #studentsSelector not found');
         return;
     }
+    // Build search + selected area
     container.innerHTML = '';
 
-    if (appState.students.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: var(--gray-500);">Primero debes agregar alumnos</p>';
-        return;
+    const selected = appState.tempSelectedStudents || [];
+
+    const selectedWrap = document.createElement('div');
+    selectedWrap.className = 'selected-students';
+    selectedWrap.id = 'studentsSelectorSelected';
+    // render selected pills
+    function renderSelectedPills() {
+        selectedWrap.innerHTML = '';
+        if (selected.length === 0) {
+            const hint = document.createElement('div');
+            hint.style.color = 'var(--gray-500)';
+            hint.style.padding = '0.5rem 0';
+            hint.textContent = 'No hay alumnos seleccionados';
+            selectedWrap.appendChild(hint);
+            return;
+        }
+        selected.forEach(id => {
+            const s = getStudentById(id);
+            if (!s) return;
+            const pill = document.createElement('div');
+            pill.className = 'student-pill';
+            pill.textContent = s.name;
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'btn-icon-only';
+            removeBtn.style.fontSize = '0.9rem';
+            removeBtn.innerHTML = '✕';
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = selected.indexOf(id);
+                if (idx !== -1) selected.splice(idx, 1);
+                renderSelectedPills();
+            });
+            pill.appendChild(removeBtn);
+            selectedWrap.appendChild(pill);
+        });
     }
 
-    appState.students.forEach(student => {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'student-checkbox';
+    // Search input
+    const searchWrap = document.createElement('div');
+    searchWrap.style.margin = '0.5rem 0';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.id = 'studentsSelectorSearch';
+    searchInput.placeholder = 'Buscar alumno...';
+    searchInput.style.width = '100%';
+    searchInput.style.padding = '0.5rem';
+    searchInput.style.border = '1px solid var(--gray-200)';
+    searchInput.style.borderRadius = '6px';
+    searchWrap.appendChild(searchInput);
 
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.id = `student-${student.id}`;
-        checkbox.value = student.id;
+    // Results list
+    const results = document.createElement('div');
+    results.id = 'studentsSelectorResults';
+    results.style.maxHeight = '180px';
+    results.style.overflow = 'auto';
+    results.style.marginTop = '0.5rem';
 
-        const label = document.createElement('label');
-        label.htmlFor = `student-${student.id}`;
-        label.textContent = student.name;
+    function renderResults(q = '') {
+        results.innerHTML = '';
+        const query = (q || '').toLowerCase();
+        const list = appState.students.filter(s => s.name.toLowerCase().includes(query) || (s.email || '').toLowerCase().includes(query));
+        if (list.length === 0) {
+            const e = document.createElement('div');
+            e.style.color = 'var(--gray-500)';
+            e.style.padding = '0.5rem 0';
+            e.textContent = 'No se encontraron alumnos';
+            results.appendChild(e);
+            return;
+        }
+        list.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'student-search-item';
+            item.style.display = 'flex';
+            item.style.justifyContent = 'space-between';
+            item.style.alignItems = 'center';
+            item.style.padding = '0.5rem';
+            item.style.borderBottom = '1px solid var(--gray-100)';
 
-        wrapper.appendChild(checkbox);
-        wrapper.appendChild(label);
-        container.appendChild(wrapper);
-    });
+            const left = document.createElement('div');
+            left.innerHTML = `<strong>${s.name}</strong><div style="font-size:0.85rem; color:var(--gray-600);">${s.email || ''}</div>`;
+
+            const action = document.createElement('button');
+            action.className = 'btn btn-secondary';
+            action.textContent = selected.includes(s.id) ? 'Quitar' : 'Añadir';
+            action.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (selected.includes(s.id)) {
+                    const idx = selected.indexOf(s.id);
+                    if (idx !== -1) selected.splice(idx, 1);
+                } else {
+                    selected.push(s.id);
+                }
+                renderSelectedPills();
+                renderResults(searchInput.value);
+            });
+
+            item.appendChild(left);
+            item.appendChild(action);
+            results.appendChild(item);
+        });
+    }
+
+    // Wire search
+    searchInput.addEventListener('input', (e) => renderResults(e.target.value));
+
+    // Initial render
+    container.appendChild(selectedWrap);
+    container.appendChild(searchWrap);
+    container.appendChild(results);
+    renderSelectedPills();
+    renderResults('');
+}
+
+// ==========================================
+// PENDING SAVE (dragged changes) MANAGEMENT
+// ==========================================
+
+function markClassPendingSave(classId, updates) {
+    const clsIndex = appState.classes.findIndex(c => c.id === classId);
+    if (clsIndex === -1) return;
+
+    // Initialize pending container if not exists or different class
+    if (!appState.pendingSave || appState.pendingSave.classId !== classId) {
+        appState.pendingSave = {
+            classId,
+            original: JSON.parse(JSON.stringify(appState.classes[clsIndex])),
+            updates: { ...updates }
+        };
+    } else {
+        // Merge updates
+        appState.pendingSave.updates = { ...appState.pendingSave.updates, ...updates };
+    }
+
+    // Apply updates to local copy for instant UI feedback
+    appState.classes[clsIndex] = { ...appState.classes[clsIndex], ...appState.pendingSave.updates };
+    saveToLocalStorage();
+    renderCalendar();
+
+    // If details modal open for this class, refresh it to show save button
+    // Also open details modal so user sees the Save/Cancelar buttons
+    showClassDetails(classId);
+}
+
+async function performPendingSave() {
+    if (!appState.pendingSave) return;
+    const { classId, updates } = appState.pendingSave;
+    try {
+        showLoading('Guardando cambios...');
+        await updateClass(classId, updates);
+        showToast('Cambios guardados', 'success');
+    } catch (err) {
+        console.error('Error guardando cambios pendientes:', err);
+        showToast('Error al guardar cambios (ver consola)', 'error');
+    } finally {
+        hideLoading();
+        // clear pending save
+        appState.pendingSave = null;
+        saveToLocalStorage();
+        renderCalendar();
+        if (appState.selectedClass === classId) showClassDetails(classId);
+    }
+}
+
+function cancelPendingSave() {
+    if (!appState.pendingSave) return;
+    const { classId, original } = appState.pendingSave;
+    const idx = appState.classes.findIndex(c => c.id === classId);
+    if (idx !== -1) {
+        appState.classes[idx] = original;
+    }
+    appState.pendingSave = null;
+    saveToLocalStorage();
+    renderCalendar();
+    if (appState.selectedClass === classId) showClassDetails(classId);
+    showToast('Cambios cancelados', 'warning');
 }
 
 function renderWeekTitle() {
@@ -711,6 +1220,8 @@ function openAddClassModal(day = '', hour = null) {
         document.getElementById('classEndMinute').value = '00';
     }
 
+    // initialize temporary selection for this form
+    appState.tempSelectedStudents = [];
     renderStudentsSelector();
     openModal('classModal');
 }
@@ -733,12 +1244,9 @@ function openEditClassModal(classId) {
     document.getElementById('classEndHour').value = endParts[0];
     document.getElementById('classEndMinute').value = endParts[1] || '00';
 
+    // initialize temporary selection with class students
+    appState.tempSelectedStudents = Array.isArray(cls.students) ? [...cls.students] : [];
     renderStudentsSelector();
-
-    cls.students.forEach(studentId => {
-        const checkbox = document.querySelector(`#student-${studentId}`);
-        if (checkbox) checkbox.checked = true;
-    });
 
     appState.selectedClass = classId;
     openModal('classModal');
@@ -764,7 +1272,8 @@ function showClassDetails(classId) {
         cls.students.forEach(studentId => {
             const student = getStudentById(studentId);
             if (student) {
-                studentsHtml += `<div class="student-item">${student.name}</div>`;
+                const levelHtml = (student.level !== null && student.level !== undefined) ? `<span class="level-badge" style="margin-left:0.5rem">Nivel: ${student.level}</span>` : '';
+                studentsHtml += `<div class="student-item">${student.name}${levelHtml}</div>`;
             }
         });
     }
@@ -792,6 +1301,42 @@ function showClassDetails(classId) {
 
     appState.selectedClass = classId;
     updateToggleCompletedButton(cls);
+    // If there are pending changes for this class, show Save/Cancel in modal actions
+    const modal = document.getElementById('classDetailsModal');
+    const actions = modal ? modal.querySelector('.modal-actions') : null;
+    if (actions) {
+        // Remove existing dynamic buttons to avoid duplicates
+        const existingSave = document.getElementById('saveDraggedClassBtn');
+        if (existingSave) existingSave.remove();
+        const existingCancel = document.getElementById('cancelDraggedClassBtn');
+        if (existingCancel) existingCancel.remove();
+
+        if (appState.pendingSave && appState.pendingSave.classId === classId) {
+            const saveBtn = document.createElement('button');
+            saveBtn.id = 'saveDraggedClassBtn';
+            saveBtn.className = 'btn btn-primary';
+            saveBtn.textContent = 'Guardar cambios';
+            saveBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                performPendingSave();
+            });
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.id = 'cancelDraggedClassBtn';
+            cancelBtn.className = 'btn btn-secondary';
+            cancelBtn.textContent = 'Cancelar cambios';
+            cancelBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (confirm('¿Cancelar los cambios realizados arrastrando la clase?')) {
+                    cancelPendingSave();
+                }
+            });
+
+            // insert save & cancel before delete/edit to make them prominent
+            actions.insertBefore(saveBtn, actions.firstChild);
+            actions.insertBefore(cancelBtn, actions.firstChild);
+        }
+    }
     openModal('classDetailsModal');
 }
 
@@ -812,12 +1357,27 @@ async function handleClassFormSubmit(e) {
     const endMinute = document.getElementById('classEndMinute').value;
     const endTime = `${endHour}:${endMinute}`;
 
-    const selectedStudents = Array.from(
-        document.querySelectorAll('#studentsSelector input[type="checkbox"]:checked')
-    ).map(cb => cb.value);
+    const selectedStudents = Array.isArray(appState.tempSelectedStudents) ? appState.tempSelectedStudents : [];
 
     if (selectedStudents.length > CONFIG.maxStudentsPerClass) {
         showToast(`Máximo ${CONFIG.maxStudentsPerClass} alumnos por clase`, 'error');
+        return;
+    }
+
+    // Validate times (expect HH:MM)
+    const timePattern = /^\d{2}:\d{2}$/;
+    if (!timePattern.test(startTime) || !timePattern.test(endTime)) {
+        showToast('Formato de hora inválido', 'error');
+        return;
+    }
+
+    // Ensure end time is after start time
+    const [sh, sm] = startTime.split(':').map(n => parseInt(n, 10));
+    const [eh, em] = endTime.split(':').map(n => parseInt(n, 10));
+    const startMinutes = sh * 60 + sm;
+    const endMinutes = eh * 60 + em;
+    if (endMinutes <= startMinutes) {
+        showToast('La hora de fin debe ser posterior a la de inicio', 'error');
         return;
     }
 
@@ -841,10 +1401,14 @@ async function handleClassFormSubmit(e) {
         }
 
         hideLoading();
+        // clear temp selection for next time
+        appState.tempSelectedStudents = [];
         closeModal('classModal');
     } catch (error) {
         hideLoading();
         console.error('Error saving class:', error);
+        try { console.error('Error details:', JSON.stringify(error, null, 2)); } catch (e) {}
+        showToast('Error guardando clase (ver consola)', 'error');
     }
 }
 
@@ -869,7 +1433,17 @@ async function handleStudentFormSubmit(e) {
 
     try {
         showLoading('Guardando alumno...');
-        await addStudent(name, email, phone, level !== '' ? parseFloat(level) : null);
+        if (appState.editingStudent) {
+            await updateStudent(appState.editingStudent, {
+                name,
+                email,
+                phone,
+                level: level !== '' ? parseFloat(level) : null
+            });
+            appState.editingStudent = null;
+        } else {
+            await addStudent(name, email, phone, level !== '' ? parseFloat(level) : null);
+        }
         hideLoading();
         closeModal('studentModal');
         document.getElementById('studentForm').reset();
@@ -1162,6 +1736,9 @@ function initializeEventListeners() {
     if (addStudentBtn) addStudentBtn.addEventListener('click', () => {
         const form = getEl('studentForm');
         if (form) form.reset();
+        appState.editingStudent = null;
+        const header = document.querySelector('#studentModal .modal-header h2');
+        if (header) header.textContent = 'Añadir Alumno';
         openModal('studentModal');
     });
 
@@ -1185,12 +1762,14 @@ function initializeEventListeners() {
     if (closeClassModalBtn) closeClassModalBtn.addEventListener('click', () => {
         closeModal('classModal');
         appState.selectedClass = null;
+        appState.tempSelectedStudents = [];
     });
 
     const cancelClassBtnEl = getEl('cancelClassBtn');
     if (cancelClassBtnEl) cancelClassBtnEl.addEventListener('click', () => {
         closeModal('classModal');
         appState.selectedClass = null;
+        appState.tempSelectedStudents = [];
     });
 
     const classFormEl = getEl('classForm');
@@ -1226,11 +1805,54 @@ function initializeEventListeners() {
     const todayBtnEl = getEl('todayBtn');
     if (todayBtnEl) todayBtnEl.addEventListener('click', goToToday);
 
-    // Sidebar toggle
-    const toggleSidebarBtnEl = getEl('toggleSidebarBtn');
-    if (toggleSidebarBtnEl) toggleSidebarBtnEl.addEventListener('click', () => {
-        const sidebarEl = getEl('sidebar');
-        if (sidebarEl) sidebarEl.classList.toggle('active');
+    // Snap toggle button (15m / 30m)
+    const weekNavEl = document.querySelector('.week-navigation');
+    if (weekNavEl && !document.getElementById('snapToggleBtn')) {
+        const snapBtn = document.createElement('button');
+        snapBtn.id = 'snapToggleBtn';
+        snapBtn.className = 'btn btn-sm';
+        snapBtn.style.marginLeft = '8px';
+        snapBtn.textContent = `Snap: ${CONFIG.snapMinutes}m`;
+        snapBtn.title = 'Alternar snap entre 15 y 30 minutos';
+        snapBtn.addEventListener('click', () => {
+            CONFIG.snapMinutes = CONFIG.snapMinutes === 15 ? 30 : 15;
+            snapBtn.textContent = `Snap: ${CONFIG.snapMinutes}m`;
+            showToast(`Snap cambiado a ${CONFIG.snapMinutes} minutos`, 'success');
+        });
+        weekNavEl.appendChild(snapBtn);
+    }
+
+    // Ver Alumnos modal (full-screen list)
+    const toggleStudentsBtn = getEl('toggleSidebarBtn');
+    const studentsModal = getEl('studentsModal');
+    const studentsModalSearch = getEl('studentsModalSearch');
+
+    if (toggleStudentsBtn && studentsModal) {
+        toggleStudentsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            renderStudentsDropdown();
+            openModal('studentsModal');
+            if (studentsModalSearch) { studentsModalSearch.value = ''; studentsModalSearch.focus(); }
+        });
+    }
+
+    if (studentsModalSearch) {
+        studentsModalSearch.addEventListener('input', (e) => renderStudentsDropdown(e.target.value));
+    }
+
+    // Close button inside dropdown
+    const closeStudentsModalBtn = getEl('closeStudentsModal');
+    if (closeStudentsModalBtn) closeStudentsModalBtn.addEventListener('click', (e) => { e.stopPropagation(); closeModal('studentsModal'); });
+
+    const studentsModalAddBtn = getEl('studentsModalAddBtn');
+    if (studentsModalAddBtn) studentsModalAddBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const form = getEl('studentForm');
+        if (form) form.reset();
+        appState.editingStudent = null;
+        const header = document.querySelector('#studentModal .modal-header h2');
+        if (header) header.textContent = 'Añadir Alumno';
+        openModal('studentModal');
     });
 
     const closeSidebarBtnEl = getEl('closeSidebarBtn');
@@ -1268,15 +1890,19 @@ function initializeEventListeners() {
 
 async function initializeApp() {
     try {
-        // Check if Supabase is configured
+        // Check if Supabase is configured. If not, fallback to localStorage.
         if (typeof supabase === 'undefined' || !supabase) {
-            hideLoading();
-            alert('⚠️ Supabase no está configurado.\n\nPor favor:\n1. Edita config.js con tus credenciales\n2. Ejecuta schema.sql en Supabase\n3. Recarga la página');
-            return;
+            console.warn('Supabase no está configurado. Usando datos locales (localStorage) como fallback.');
+            loadFromLocalStorage();
+        } else {
+            // Try loading data from Supabase, but fallback to localStorage on error
+            try {
+                await loadAllData();
+            } catch (loadError) {
+                console.warn('Carga desde Supabase falló, usando localStorage como fallback:', loadError);
+                loadFromLocalStorage();
+            }
         }
-
-        // Load data from Supabase
-        await loadAllData();
 
         // Set current week
         appState.currentWeekStart = getMonday(new Date());
@@ -1300,6 +1926,9 @@ async function initializeApp() {
         alert('❌ Error al inicializar la aplicación.\n\nDetalles en la consola (F12)');
     }
 }
+
+    // Prevent clicks inside dropdown from closing it via document click
+    // No special stopPropagation needed for modal; modal background click handler closes modal already.
 
 // Start the app when DOM is ready
 document.addEventListener('DOMContentLoaded', initializeApp);

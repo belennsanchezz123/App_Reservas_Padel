@@ -117,10 +117,35 @@
                         <span class="btn-icon">+</span>
                         Nueva Clase
                     </button>
+                    <!-- botón 'Añadir Alumno' eliminado (ya existe en la barra lateral) -->
                     <button class="btn btn-secondary" id="toggleSidebarBtn">
                         <span class="btn-icon">👥</span>
                         Ver Alumnos
                     </button>
+                    <!-- Students modal (opens full-screen modal) -->
+                    <div class="modal" id="studentsModal">
+                        <div class="modal-content" style="max-width:720px; width:90%;">
+                            <div class="modal-header">
+                                <h3>Alumnos</h3>
+                                <button class="btn-close" id="closeStudentsModal">✕</button>
+                            </div>
+
+                            <div style="padding: var(--spacing-md); border-bottom: 1px solid var(--gray-100); display:flex; gap:var(--spacing-md); align-items:center; justify-content:space-between;">
+                                <div style="flex:1; margin-right: var(--spacing-md);">
+                                    <input type="text" id="studentsModalSearch" placeholder="Buscar por nombre..." style="width:100%; padding:var(--spacing-sm) var(--spacing-md); border:1px solid var(--gray-200); border-radius:var(--radius-md);">
+                                </div>
+                                <div style="display:flex; gap:0.5rem;">
+                                    <button class="btn btn-primary" id="studentsModalAddBtn">Nuevo Alumno</button>
+                                </div>
+                            </div>
+
+                            <div style="padding: var(--spacing-md);">
+                                <div class="students-modal-list" id="studentsModalList" style="max-height: 60vh; overflow:auto;">
+                                    <!-- Lista inyectada por JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Calendar Grid -->
@@ -198,6 +223,7 @@
                                 <option value="20">20</option>
                                 <option value="21">21</option>
                                 <option value="22">22</option>
+                                <option value="23">23</option>
                             </select>
                             <select id="classStartMinute" required style="flex: 1;">
                                 <option value="">MM</option>
@@ -230,6 +256,7 @@
                                 <option value="20">20</option>
                                 <option value="21">21</option>
                                 <option value="22">22</option>
+                                <option value="23">23</option>
                             </select>
                             <select id="classEndMinute" required style="flex: 1;">
                                 <option value="">MM</option>
@@ -242,9 +269,9 @@
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Alumnos (máx. 4)</label>
+                    <label>Alumnos</label>
                     <div class="students-selector" id="studentsSelector">
-                        <!-- Student checkboxes will be injected here -->
+                        <!-- Search + selected students injected by JS -->
                     </div>
                 </div>
                 <div class="modal-actions">
