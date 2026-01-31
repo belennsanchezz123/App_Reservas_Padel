@@ -1381,13 +1381,11 @@ function closeSaveChangesModal() {
 
 function discardChanges() {
     closeConfirmChangesModal();
-    closeSaveChangesModal();
     cancelPendingSave();
 }
 
 function saveChanges() {
     closeConfirmChangesModal();
-    closeSaveChangesModal();
     performPendingSave();
 }
 
