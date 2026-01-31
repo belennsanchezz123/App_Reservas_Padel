@@ -1111,9 +1111,16 @@ function markClassPendingSave(classId, updates) {
     saveToLocalStorage();
     renderCalendar();
 
-    // If details modal open for this class, refresh it to show save button
-    // Also open details modal so user sees the Save/Cancelar buttons
-    showClassDetails(classId);
+    // Show confirm changes modal with the actual changes made
+    const original = appState.pendingSave.original;
+    const newClass = appState.classes[clsIndex];
+    
+    const changedDay = newClass.day !== original.day ? `${original.day} → ${newClass.day}` : newClass.day;
+    const changedTime = (newClass.startTime !== original.startTime || newClass.endTime !== original.endTime) 
+        ? `${original.startTime} - ${original.endTime} → ${newClass.startTime} - ${newClass.endTime}` 
+        : `${newClass.startTime} - ${newClass.endTime}`;
+    
+    showConfirmChangesModal(changedDay, changedTime);
 }
 
 async function performPendingSave() {
@@ -1356,6 +1363,32 @@ function showClassDetails(classId) {
         }
     }
     openModal('classDetailsModal');
+}
+
+function showConfirmChangesModal(changedDay, changedTime) {
+    document.getElementById('changedDay').textContent = changedDay;
+    document.getElementById('changedTime').textContent = changedTime;
+    openModal('confirmChangesModal');
+}
+
+function closeConfirmChangesModal() {
+    closeModal('confirmChangesModal');
+}
+
+function closeSaveChangesModal() {
+    closeModal('saveChangesModal');
+}
+
+function discardChanges() {
+    closeConfirmChangesModal();
+    closeSaveChangesModal();
+    cancelPendingSave();
+}
+
+function saveChanges() {
+    closeConfirmChangesModal();
+    closeSaveChangesModal();
+    performPendingSave();
 }
 
 // ==========================================
