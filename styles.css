@@ -1416,31 +1416,3 @@ button, a {
   padding: 10px 20px;
   font-size: 16px;
 }
-
-/* Estilos para pantallas grandes */
-.sidebar {
-    display: block;
-    width: 300px;
-    position: fixed;
-    left: 0;
-    top: 0;
-    height: 100%;
-    background-color: #f8f9fa;
-    overflow-y: auto;
-    z-index: 1000;
-}
-
-/* Estilos para pantallas pequeñas */
-@media (max-width: 768px) {
-    .sidebar {
-        display: none; /* Oculta el panel en pantallas pequeñas */
-    }
-
-    .sidebar.open {
-        display: block; /* Muestra el panel cuando está abierto */
-        position: absolute;
-        width: 100%;
-        height: auto;
-        z-index: 1000;
-    }
-}
