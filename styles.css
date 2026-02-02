@@ -1398,30 +1398,7 @@ form {
 
 /* Responsive styles for mobile devices */
 @media (max-width: 768px) {
-  body {
-    font-size: 14px;
-    padding: 10px;
-  }
-
-  .contenedor {
-    flex-direction: column;
-    padding: 5px;
-  }
-
-  nav {
-    display: flex;
-    flex-direction: column;
-  }
-}
-
-/* Ensure images are responsive */
-img {
-  max-width: 100%;
-  height: auto;
-}
-
-/* Improve touch targets for buttons and links */
-button, a {
-  padding: 10px 20px;
-  font-size: 16px;
+    body {
+        font-size: 14px;
+    }
 }

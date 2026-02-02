@@ -1600,6 +1600,75 @@ function goToToday() {
     renderCalendar();
 }
 
+// Copiar todas las clases de la semana actual a la semana siguiente
+async function copyCurrentWeekToNext() {
+    try {
+        const sourceWeekStart = new Date(appState.currentWeekStart);
+        const targetWeekStart = new Date(sourceWeekStart);
+        targetWeekStart.setDate(targetWeekStart.getDate() + 7);
+
+        const sourceClasses = getClassesForWeek(sourceWeekStart);
+        if (sourceClasses.length === 0) {
+            showToast('No hay clases en esta semana para copiar', 'error');
+            return;
+        }
+
+        const existingTarget = getClassesForWeek(targetWeekStart);
+        if (existingTarget.length > 0) {
+            const ok = confirm('La semana siguiente ya tiene clases. ¿Quieres copiar igualmente y añadir más?');
+            if (!ok) return;
+        }
+
+        showLoading('Copiando clases a la semana siguiente...');
+
+        const createdClasses = [];
+        for (const cls of sourceClasses) {
+            const dayIndex = CONFIG.days.indexOf(cls.day);
+            const newDate = getDateForDay(targetWeekStart, dayIndex);
+
+            const newClass = {
+                id: generateId(),
+                day: cls.day,
+                date: newDate.toISOString(),
+                startTime: cls.startTime,
+                endTime: cls.endTime,
+                students: [...cls.students],
+                maxCapacity: cls.maxCapacity,
+                status: 'active',
+                isCompleted: false,
+                monitorId: cls.monitorId,
+                monitorName: cls.monitorName,
+                comments: cls.comments || ''
+            };
+
+            try {
+                const result = await db.createClass(newClass);
+                const converted = db.convertClassFromDB(result);
+                appState.classes.push(converted);
+                createdClasses.push(converted);
+            } catch (dbError) {
+                console.warn('Error copiando clase a Supabase, guardando solo localmente:', dbError);
+                appState.classes.push(newClass);
+                createdClasses.push(newClass);
+            }
+        }
+
+        saveToLocalStorage();
+
+        // Movernos visualmente a la semana destino para que el usuario vea el resultado
+        appState.currentWeekStart = targetWeekStart;
+        renderWeekTitle();
+        renderCalendar();
+
+        hideLoading();
+        showToast(`Se copiaron ${createdClasses.length} clases a la semana siguiente`, 'success');
+    } catch (error) {
+        console.error('Error copiando semana:', error);
+        hideLoading();
+        showToast('Error al copiar clases de la semana', 'error');
+    }
+}
+
 // ==========================================
 // TOAST NOTIFICATIONS
 // ==========================================
@@ -1914,6 +1983,9 @@ function initializeEventListeners() {
     if (nextWeekBtn) nextWeekBtn.addEventListener('click', () => navigateWeek(1));
     const todayBtnEl = getEl('todayBtn');
     if (todayBtnEl) todayBtnEl.addEventListener('click', goToToday);
+
+    const copyWeekBtnEl = getEl('copyWeekBtn');
+    if (copyWeekBtnEl) copyWeekBtnEl.addEventListener('click', copyCurrentWeekToNext);
 
     // Snap toggle button (15m / 30m)
     const weekNavEl = document.querySelector('.week-navigation');
