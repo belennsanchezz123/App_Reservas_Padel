@@ -1362,6 +1362,21 @@ form {
    RESPONSIVE - MULTI-USER
    ========================================== */
 @media (max-width: 768px) {
+    .login-screen {
+        justify-content: flex-start;
+        align-items: flex-start;
+        padding: var(--spacing-xl) var(--spacing-md);
+        overflow-y: auto;
+    }
+
+    .login-container {
+        max-width: 100%;
+        width: 100%;
+        min-height: 100vh;
+        border-radius: 0;
+        box-shadow: none;
+    }
+
     .login-roles {
         grid-template-columns: 1fr;
     }
