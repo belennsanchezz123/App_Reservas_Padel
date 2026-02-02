@@ -87,6 +87,10 @@ function minutesToTime(totalMinutes) {
     return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
+function isTouchDevice() {
+    return ('ontouchstart' in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+}
+
 function showLoading(message = 'Cargando...') {
     const overlay = document.getElementById('loadingOverlay');
     if (overlay) {
@@ -725,8 +729,9 @@ function createClassCard(cls) {
     resizeHandle.title = 'Arrastrar para ajustar duración';
     card.appendChild(resizeHandle);
 
-    // Resize logic: snap to 15 minutes
-    resizeHandle.addEventListener('mousedown', (startEvent) => {
+    // Resize logic (solo en escritorio): snap to 15 minutes
+    if (!isTouchDevice()) {
+        resizeHandle.addEventListener('mousedown', (startEvent) => {
         startEvent.stopPropagation();
         startEvent.preventDefault();
 
@@ -769,12 +774,14 @@ function createClassCard(cls) {
             markClassPendingSave(cls.id, { endTime: newEndTime });
         }
 
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-    });
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+    }
 
-    // Drag-to-move logic: change start time by dragging the card vertically and change day by dragging horizontally
-    card.addEventListener('mousedown', (startEvent) => {
+    // Drag-to-move logic (solo en escritorio): change start time by dragging the card vertically and change day by dragging horizontally
+    if (!isTouchDevice()) {
+        card.addEventListener('mousedown', (startEvent) => {
         // Ignore right-clicks and interactions that started on the resize handle
         if (startEvent.button !== 0) return;
         if (startEvent.target.closest('.resize-handle')) return;
@@ -855,9 +862,10 @@ function createClassCard(cls) {
             markClassPendingSave(cls.id, { startTime: newStartTime, endTime: newEndTime, day: newDay, date: newDate });
         }
 
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-    });
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+    }
 
     card.addEventListener('click', (e) => {
         e.stopPropagation();
