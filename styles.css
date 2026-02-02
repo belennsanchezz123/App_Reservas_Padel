@@ -1388,6 +1388,13 @@ form {
     .header-actions {
         flex-direction: column;
         gap: var(--spacing-sm);
+        width: 100%;
+        align-items: stretch;
+    }
+
+    .header-actions .btn {
+        width: 100%;
+        justify-content: center;
     }
 
     .dashboard-header {
