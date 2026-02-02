@@ -867,6 +867,96 @@ function createClassCard(cls) {
         });
     }
 
+    // Drag-to-move logic en dispositivos táctiles (touch):
+    // arrastrar verticalmente cambia la hora, horizontalmente cambia el día.
+    if (isTouchDevice()) {
+        card.addEventListener('touchstart', (startEvent) => {
+            const touch = startEvent.touches[0];
+            if (!touch) return;
+
+            const rootStyles = getComputedStyle(document.documentElement);
+            const slotHeightStr = rootStyles.getPropertyValue('--slot-height') || '60px';
+            const slotHeight = parseInt(slotHeightStr, 10) || 60;
+            const pixelsPerMinute = slotHeight / 60;
+
+            const sampleCell = document.querySelector('.calendar-cell');
+            const dayCellWidth = sampleCell ? sampleCell.getBoundingClientRect().width : 140;
+
+            const startY = touch.clientY;
+            const startX = touch.clientX;
+            const initialStartMinutes = startMinutes;
+            const duration = durationMinutes;
+            const initialDayIndex = CONFIG.days.indexOf(cls.day);
+
+            let moved = false;
+
+            card.style.zIndex = 9999;
+
+            function onTouchMove(ev) {
+                const t = ev.touches[0];
+                if (!t) return;
+                const deltaY = t.clientY - startY;
+                const deltaX = t.clientX - startX;
+                if (Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4) moved = true;
+                card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+            }
+
+            function onTouchEnd(ev) {
+                document.removeEventListener('touchmove', onTouchMove);
+                document.removeEventListener('touchend', onTouchEnd);
+                card.style.zIndex = '';
+
+                // Reset transform visual
+                const changedTouches = ev.changedTouches && ev.changedTouches[0];
+                const endY = changedTouches ? changedTouches.clientY : startY;
+                const endX = changedTouches ? changedTouches.clientX : startX;
+                const deltaY = endY - startY;
+                const deltaX = endX - startX;
+                card.style.transform = '';
+
+                if (!moved) {
+                    // Tratar como toque simple: abrir detalles
+                    showClassDetails(cls.id);
+                    return;
+                }
+
+                // Vertical: calcular minutos y hacer snap a CONFIG.snapMinutes
+                const rawDeltaMinutes = Math.round(deltaY / pixelsPerMinute);
+                const snappedMinutes = Math.round(rawDeltaMinutes / CONFIG.snapMinutes) * CONFIG.snapMinutes;
+
+                let finalStart = initialStartMinutes + snappedMinutes;
+                const minStart = CONFIG.hoursStart * 60;
+                const maxStart = (CONFIG.hoursEnd * 60) - duration;
+                if (finalStart < minStart) finalStart = minStart;
+                if (finalStart > maxStart) finalStart = maxStart;
+
+                const finalEnd = finalStart + duration;
+
+                // Horizontal: calcular cambio de día
+                const dayShift = Math.round(deltaX / dayCellWidth);
+                let finalDayIndex = initialDayIndex + dayShift;
+                if (finalDayIndex < 0) finalDayIndex = 0;
+                if (finalDayIndex > 6) finalDayIndex = 6;
+
+                const newStartTime = minutesToTime(finalStart);
+                const newEndTime = minutesToTime(finalEnd);
+                const newDay = CONFIG.days[finalDayIndex];
+                const newDate = getDateForDay(appState.currentWeekStart, finalDayIndex).toISOString();
+
+                // Aplicar cambios y marcar como pendiente de guardar
+                markClassPendingSave(cls.id, {
+                    startTime: newStartTime,
+                    endTime: newEndTime,
+                    day: newDay,
+                    date: newDate,
+                });
+            }
+
+            document.addEventListener('touchmove', onTouchMove);
+            document.addEventListener('touchend', onTouchEnd);
+        });
+    }
+
     card.addEventListener('click', (e) => {
         e.stopPropagation();
         showClassDetails(cls.id);
