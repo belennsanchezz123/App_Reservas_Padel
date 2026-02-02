@@ -437,17 +437,24 @@ async function deleteClass(classId) {
     try {
         try {
             await db.deleteClass(classId);
-            appState.classes = appState.classes.filter(c => c.id !== classId);
-            renderCalendar();
+            // Refrescamos datos desde Supabase para asegurar consistencia
+            try {
+                await loadAllData();
+            } catch (reloadError) {
+                console.warn('No se pudieron recargar los datos tras borrar la clase, actualizando solo en memoria:', reloadError);
+                appState.classes = appState.classes.filter(c => c.id !== classId);
+            }
             saveToLocalStorage();
             showToast('Clase eliminada', 'success');
         } catch (dbError) {
             console.warn('db.deleteClass falló, eliminando localmente:', dbError);
             appState.classes = appState.classes.filter(c => c.id !== classId);
-            renderCalendar();
             saveToLocalStorage();
             showToast('Clase eliminada localmente (sin conexión)', 'warning');
         }
+        // En cualquier caso, limpiamos la selección y redibujamos el calendario
+        appState.selectedClass = null;
+        renderCalendar();
     } catch (error) {
         console.error('Error deleting class:', error);
         showToast('Error al eliminar clase', 'error');
