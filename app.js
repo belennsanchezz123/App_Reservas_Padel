@@ -2022,7 +2022,13 @@ function initializeEventListeners() {
             e.stopPropagation();
             renderStudentsDropdown();
             openModal('studentsModal');
-            if (studentsModalSearch) { studentsModalSearch.value = ''; studentsModalSearch.focus(); }
+            if (studentsModalSearch) {
+                studentsModalSearch.value = '';
+                // En móvil evitar auto-focus para que no haga zoom la pantalla
+                if (!isTouchDevice()) {
+                    studentsModalSearch.focus();
+                }
+            }
         });
     }
 
