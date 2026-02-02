@@ -267,7 +267,8 @@ const db = {
                     status: classData.status || 'active',
                     is_completed: classData.isCompleted || false,
                     monitor_id: classData.monitorId,
-                    monitor_name: classData.monitorName
+                    monitor_name: classData.monitorName,
+                    comments: classData.comments || null
                 }])
                 .select()
                 .single();
@@ -295,6 +296,7 @@ const db = {
             if (updates.isCompleted !== undefined) dbUpdates.is_completed = updates.isCompleted;
             if (updates.monitorId !== undefined) dbUpdates.monitor_id = updates.monitorId;
             if (updates.monitorName !== undefined) dbUpdates.monitor_name = updates.monitorName;
+            if (updates.comments !== undefined) dbUpdates.comments = updates.comments;
 
             const { data, error } = await supabase
                 .from('classes')
@@ -345,7 +347,8 @@ const db = {
             status: dbClass.status,
             isCompleted: dbClass.is_completed,
             monitorId: dbClass.monitor_id,
-            monitorName: dbClass.monitor_name
+            monitorName: dbClass.monitor_name,
+            comments: dbClass.comments || ''
         };
     },
 

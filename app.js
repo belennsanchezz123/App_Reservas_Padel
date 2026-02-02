@@ -252,9 +252,32 @@ function getMonitorStats(monitorId) {
         cls.students.forEach(sid => studentIds.add(sid));
     });
 
+    // Calcular horas impartidas en el mes actual (solo clases marcadas como completadas)
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    function getClassDurationHours(cls) {
+        if (!cls.startTime || !cls.endTime) return 0;
+        const [sh, sm = '0'] = cls.startTime.split(':');
+        const [eh, em = '0'] = cls.endTime.split(':');
+        const startMinutes = parseInt(sh, 10) * 60 + parseInt(sm, 10);
+        const endMinutes = parseInt(eh, 10) * 60 + parseInt(em, 10);
+        const durationMinutes = Math.max(endMinutes - startMinutes, 0);
+        return durationMinutes / 60;
+    }
+
+    const monthlyHours = classes
+        .filter(cls => {
+            const d = new Date(cls.date);
+            return d >= monthStart && d < nextMonthStart && cls.isCompleted;
+        })
+        .reduce((sum, cls) => sum + getClassDurationHours(cls), 0);
+
     return {
         totalClasses: classes.length,
         totalStudents: studentIds.size,
+        hoursThisMonth: Number.isFinite(monthlyHours) ? monthlyHours : 0,
     };
 }
 
@@ -368,6 +391,9 @@ async function addClass(day, startTime, endTime, studentIds) {
             monitorName = appState.selectedMonitor ? getMonitorById(appState.selectedMonitor)?.name : null;
         }
 
+        const commentsInput = document.getElementById('classComments');
+        const comments = commentsInput ? commentsInput.value.trim() : '';
+
         const newClass = {
             id: generateId(),
             day,
@@ -380,6 +406,7 @@ async function addClass(day, startTime, endTime, studentIds) {
             isCompleted: false,
             monitorId,
             monitorName,
+            comments,
         };
 
         try {
@@ -926,7 +953,15 @@ function renderStudentsDropdown(filter = '') {
         const label = document.createElement('label');
         label.htmlFor = `dd-student-${s.id}`;
         label.style.cursor = 'pointer';
-        label.innerHTML = `<strong style="display:block">${s.name}</strong><div class="meta">${s.email || ''}</div>`;
+
+        const metaParts = [];
+        if (s.email) metaParts.push(s.email);
+        if (s.phone) metaParts.push(s.phone);
+
+        label.innerHTML = `
+            <strong style="display:block">${s.name}</strong>
+            <div class="meta">${metaParts.join(' · ')}</div>
+        `;
 
         left.appendChild(checkbox);
         left.appendChild(label);
@@ -1214,6 +1249,10 @@ function renderMonitorsList() {
                     <span class="stat-value">${stats.totalStudents}</span>
                     <span class="stat-label">Alumnos</span>
                 </div>
+                <div class="stat-item">
+                    <span class="stat-value">${stats.hoursThisMonth.toFixed(1)}</span>
+                    <span class="stat-label">Horas mes</span>
+                </div>
             </div>
         `;
 
@@ -1255,6 +1294,9 @@ function openAddClassModal(day = '', hour = null) {
     // initialize temporary selection for this form
     appState.tempSelectedStudents = [];
     renderStudentsSelector();
+
+    const commentsEl = document.getElementById('classComments');
+    if (commentsEl) commentsEl.value = '';
     openModal('classModal');
 }
 
@@ -1279,6 +1321,9 @@ function openEditClassModal(classId) {
     // initialize temporary selection with class students
     appState.tempSelectedStudents = Array.isArray(cls.students) ? [...cls.students] : [];
     renderStudentsSelector();
+
+    const commentsEl = document.getElementById('classComments');
+    if (commentsEl) commentsEl.value = cls.comments || '';
 
     appState.selectedClass = classId;
     openModal('classModal');
@@ -1328,6 +1373,7 @@ function showClassDetails(classId) {
             <span class="detail-label">Ocupación:</span>
             <span class="detail-value">${cls.students.length}/${cls.maxCapacity} (${occupancyText})${completedBadge}</span>
         </div>
+        ${cls.comments ? `<div class="detail-row"><span class="detail-label">Comentarios:</span><span class="detail-value">${cls.comments}</span></div>` : ''}
         ${studentsHtml}
     `;
 
@@ -1413,6 +1459,9 @@ async function handleClassFormSubmit(e) {
     const endMinute = document.getElementById('classEndMinute').value;
     const endTime = `${endHour}:${endMinute}`;
 
+    const commentsEl = document.getElementById('classComments');
+    const comments = commentsEl ? commentsEl.value.trim() : '';
+
     const selectedStudents = Array.isArray(appState.tempSelectedStudents) ? appState.tempSelectedStudents : [];
 
     if (selectedStudents.length > CONFIG.maxStudentsPerClass) {
@@ -1450,6 +1499,7 @@ async function handleClassFormSubmit(e) {
                 startTime,
                 endTime,
                 students: selectedStudents,
+                comments,
             });
             appState.selectedClass = null;
         } else {
@@ -1969,6 +2019,10 @@ async function initializeApp() {
 
         // Initialize event listeners
         initializeEventListeners();
+
+        // Render initial week title and calendar
+        renderWeekTitle();
+        renderCalendar();
 
         // Check if user is logged in (from localStorage)
         const savedUser = localStorage.getItem('padelApp_currentUser');

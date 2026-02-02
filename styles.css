@@ -844,7 +844,8 @@ form {
 }
 
 .form-group input,
-.form-group select {
+.form-group select,
+.form-group textarea {
     width: 100%;
     padding: var(--spacing-sm) var(--spacing-md);
     border: 2px solid var(--gray-200);
@@ -855,7 +856,8 @@ form {
 }
 
 .form-group input:focus,
-.form-group select:focus {
+.form-group select:focus,
+.form-group textarea:focus {
     outline: none;
     border-color: var(--primary-green);
     box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
@@ -1051,8 +1053,15 @@ form {
 }
 
 @media (max-width: 768px) {
+    .header {
+        padding: var(--spacing-md);
+    }
+
     .header-content {
+        max-width: 100%;
+        width: 100%;
         flex-direction: column;
+        align-items: center;
         text-align: center;
     }
 

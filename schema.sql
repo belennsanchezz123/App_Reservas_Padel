@@ -36,12 +36,17 @@ CREATE TABLE IF NOT EXISTS classes (
   is_completed BOOLEAN DEFAULT FALSE,
   monitor_id TEXT REFERENCES monitors(id) ON DELETE CASCADE,
   monitor_name TEXT,
+  comments TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 ALTER TABLE students 
 ADD COLUMN level DECIMAL(2,1) 
 CHECK (level >= 0 AND level <= 5);
+
+-- Comentarios opcionales en clases (si no existía la columna)
+ALTER TABLE classes 
+ADD COLUMN IF NOT EXISTS comments TEXT;
 
 -- Índices para mejorar el rendimiento
 CREATE INDEX IF NOT EXISTS idx_classes_date ON classes(date);
