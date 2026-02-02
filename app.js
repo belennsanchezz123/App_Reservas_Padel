@@ -91,6 +91,38 @@ function isTouchDevice() {
     return ('ontouchstart' in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
 }
 
+function timeStringToMinutes(timeStr) {
+    if (!timeStr) return 0;
+    const [h, m] = String(timeStr).split(':').map(n => parseInt(n, 10) || 0);
+    return h * 60 + m;
+}
+
+function isSameCalendarDay(dateA, dateB) {
+    const d1 = new Date(dateA);
+    const d2 = new Date(dateB);
+    return d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate();
+}
+
+function hasClassTimeConflict(targetDate, startTime, endTime, excludeClassId = null) {
+    const targetStart = timeStringToMinutes(startTime);
+    const targetEnd = timeStringToMinutes(endTime);
+    if (!targetDate || isNaN(targetStart) || isNaN(targetEnd)) return false;
+
+    return appState.classes.some(cls => {
+        if (!cls || !cls.date) return false;
+        if (excludeClassId && cls.id === excludeClassId) return false;
+        if (!isSameCalendarDay(cls.date, targetDate)) return false;
+
+        const otherStart = timeStringToMinutes(cls.startTime);
+        const otherEnd = timeStringToMinutes(cls.endTime);
+
+        // Overlap if intervals intersect: [start, end) ∩ [otherStart, otherEnd) ≠ ∅
+        return targetStart < otherEnd && targetEnd > otherStart;
+    });
+}
+
 function showLoading(message = 'Cargando...') {
     const overlay = document.getElementById('loadingOverlay');
     if (overlay) {
@@ -717,10 +749,16 @@ function createClassCard(cls) {
         monitorDisplay = `<div class="class-card-monitor">👤 ${cls.monitorName}</div>`;
     }
 
+    const hasComments = cls.comments != null && String(cls.comments).trim().length > 0;
+    const commentsIndicator = hasComments
+        ? `<div class="class-card-comments-indicator" title="Esta clase tiene comentarios del monitor">💬</div>`
+        : '';
+
     card.innerHTML = `
         <div class="class-card-time">${cls.startTime} - ${cls.endTime}</div>
         <div class="class-card-occupancy">${studentsCount}/${maxCapacity}</div>
         ${monitorDisplay}
+        ${commentsIndicator}
     `;
 
     // Add resize handle for adjusting duration visually
@@ -729,9 +767,8 @@ function createClassCard(cls) {
     resizeHandle.title = 'Arrastrar para ajustar duración';
     card.appendChild(resizeHandle);
 
-    // Resize logic (solo en escritorio): snap to 15 minutes
-    if (!isTouchDevice()) {
-        resizeHandle.addEventListener('mousedown', (startEvent) => {
+    // Resize logic con ratón: snap a 15 minutos
+    resizeHandle.addEventListener('mousedown', (startEvent) => {
         startEvent.stopPropagation();
         startEvent.preventDefault();
 
@@ -777,11 +814,9 @@ function createClassCard(cls) {
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('mouseup', onMouseUp);
         });
-    }
 
-    // Drag-to-move logic (solo en escritorio): change start time by dragging the card vertically and change day by dragging horizontally
-    if (!isTouchDevice()) {
-        card.addEventListener('mousedown', (startEvent) => {
+    // Drag-to-move logic con ratón: change start time by dragging the card vertically and change day by dragging horizontally
+    card.addEventListener('mousedown', (startEvent) => {
         // Ignore right-clicks and interactions that started on the resize handle
         if (startEvent.button !== 0) return;
         if (startEvent.target.closest('.resize-handle')) return;
@@ -862,10 +897,9 @@ function createClassCard(cls) {
             markClassPendingSave(cls.id, { startTime: newStartTime, endTime: newEndTime, day: newDay, date: newDate });
         }
 
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-        });
-    }
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
 
     // Drag-to-move logic en dispositivos táctiles (touch):
     // arrastrar verticalmente cambia la hora, horizontalmente cambia el día.
@@ -1266,6 +1300,29 @@ function markClassPendingSave(classId, updates) {
 async function performPendingSave() {
     if (!appState.pendingSave) return;
     const { classId, updates } = appState.pendingSave;
+
+    // Validar que los cambios de hora/día no solapan con otra clase antes de guardar
+    const clsIndex = appState.classes.findIndex(c => c.id === classId);
+    if (clsIndex !== -1) {
+        const current = appState.classes[clsIndex];
+        const candidateDate = new Date(updates.date || current.date);
+        const candidateStartTime = updates.startTime || current.startTime;
+        const candidateEndTime = updates.endTime || current.endTime;
+
+        if (hasClassTimeConflict(candidateDate, candidateStartTime, candidateEndTime, classId)) {
+            // Revertir a la posición original si hay conflicto y limpiar el estado pendiente
+            showToast('No se puede mover la clase: ya hay otra en ese horario', 'error');
+            if (appState.pendingSave && appState.pendingSave.original) {
+                appState.classes[clsIndex] = appState.pendingSave.original;
+            }
+            appState.pendingSave = null;
+            saveToLocalStorage();
+            renderCalendar();
+            if (appState.selectedClass === classId) showClassDetails(classId);
+            return;
+        }
+    }
+
     try {
         showLoading('Guardando cambios...');
         await updateClass(classId, updates);
@@ -1549,6 +1606,11 @@ async function handleClassFormSubmit(e) {
 
     const day = document.getElementById('classDay').value;
 
+    if (!day) {
+        showToast('Debes seleccionar un día', 'error');
+        return;
+    }
+
     const startHour = document.getElementById('classStartHour').value;
     const startMinute = document.getElementById('classStartMinute').value;
     const startTime = `${startHour}:${startMinute}`;
@@ -1587,10 +1649,17 @@ async function handleClassFormSubmit(e) {
     try {
         showLoading('Guardando clase...');
 
-        if (appState.selectedClass) {
-            const dayIndex = CONFIG.days.indexOf(day);
-            const date = getDateForDay(appState.currentWeekStart, dayIndex);
+        const dayIndex = CONFIG.days.indexOf(day);
+        const date = getDateForDay(appState.currentWeekStart, dayIndex);
+        const excludeId = appState.selectedClass || null;
 
+        if (hasClassTimeConflict(date, startTime, endTime, excludeId)) {
+            hideLoading();
+            showToast('Ya existe otra clase en ese horario para ese día', 'error');
+            return;
+        }
+
+        if (appState.selectedClass) {
             await updateClass(appState.selectedClass, {
                 day,
                 date: date.toISOString(),
