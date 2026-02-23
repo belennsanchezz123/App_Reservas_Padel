@@ -1153,6 +1153,7 @@ function createClassCard(cls) {
 
             let lastTouchX = pressStartX;
             let lastTouchY = pressStartY;
+            let lastScrollY = window.scrollY;
 
             // Últimos desplazamientos efectivos (clampados a los límites)
             let lastDragDeltaX = 0;
@@ -1174,6 +1175,29 @@ function createClassCard(cls) {
                         clearTimeout(longPressTimer);
                     }
                     return;
+                }
+
+                // Auto-scroll cuando el dedo se acerca a los bordes de la pantalla
+                const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+                const edgeThreshold = 80; // px desde el borde para activar auto-scroll
+                let scrollDelta = 0;
+
+                if (lastTouchY > viewportHeight - edgeThreshold) {
+                    scrollDelta = 10; // scroll hacia abajo
+                } else if (lastTouchY < edgeThreshold) {
+                    scrollDelta = -10; // scroll hacia arriba
+                }
+
+                if (scrollDelta !== 0) {
+                    const prevScrollY = window.scrollY;
+                    window.scrollBy(0, scrollDelta);
+                    const newScrollY = window.scrollY;
+                    const appliedDelta = newScrollY - prevScrollY;
+                    if (appliedDelta !== 0) {
+                        // Ajustamos el origen del drag para compensar el scroll
+                        dragStartY += appliedDelta;
+                        lastScrollY = newScrollY;
+                    }
                 }
 
                 // Si estamos en modo dragging, bloqueamos el scroll y movemos la tarjeta
