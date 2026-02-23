@@ -610,6 +610,11 @@ body {
     user-select: none;
     touch-action: none;
 }
+/*
+    Disable transitions while dragging to prevent trompicones */
+.class-card[style*="translate"] {
+    transition: none !important;
+}
 
 .class-card::before {
     content: '';

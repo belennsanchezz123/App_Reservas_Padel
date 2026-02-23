@@ -1088,14 +1088,14 @@ function createClassCard(cls) {
 
     // Drag-to-move logic en dispositivos táctiles (touch) con pulsación prolongada:
     // toque corto → abre detalles; mantener pulsado unos ms → entra en modo arrastre.
+    // Drag-to-move logic en dispositivos táctiles (touch) corregido
     if (isTouchDevice()) {
         card.addEventListener('touchstart', (startEvent) => {
             const touch = startEvent.touches[0];
             if (!touch) return;
 
             const rootStyles = getComputedStyle(document.documentElement);
-            const slotHeightStr = rootStyles.getPropertyValue('--slot-height') || '60px';
-            const slotHeight = parseInt(slotHeightStr, 10) || 60;
+            const slotHeight = parseInt(rootStyles.getPropertyValue('--slot-height'), 10) || 60;
             const pixelsPerMinute = slotHeight / 60;
 
             const sampleCell = document.querySelector('.calendar-cell');
@@ -1109,74 +1109,88 @@ function createClassCard(cls) {
 
             let dragging = false;
             let movedDuringPress = false;
-            let dragStartX = pressStartX;
-            let dragStartY = pressStartY;
-            let lastTouchX = pressStartX;
-            let lastTouchY = pressStartY;
+            
+            // Estas variables guardarán el punto de origen exacto del arrastre
+            let dragStartX = 0;
+            let dragStartY = 0;
 
             card.style.zIndex = 9999;
 
-            const longPressDelay = 350; // ms para considerar pulsación prolongada
+            const longPressDelay = 350; 
             const longPressTimer = setTimeout(() => {
-                // Si el dedo ya se ha movido demasiado, no entramos en modo drag
                 if (movedDuringPress) return;
+                
                 dragging = true;
+                // CRUCIAL: Capturamos la posición actual del dedo justo cuando 
+                // se activa el drag para que el movimiento empiece desde 0
                 dragStartX = lastTouchX;
                 dragStartY = lastTouchY;
+                
                 document.body.style.userSelect = 'none';
                 document.body.style.webkitUserSelect = 'none';
+                
+                // Feedback táctil (opcional)
+                if (window.navigator.vibrate) window.navigator.vibrate(50);
             }, longPressDelay);
+
+            let lastTouchX = pressStartX;
+            let lastTouchY = pressStartY;
 
             function onTouchMove(ev) {
                 const t = ev.touches[0];
                 if (!t) return;
+                
                 lastTouchX = t.clientX;
                 lastTouchY = t.clientY;
 
-                const deltaPressY = t.clientY - pressStartY;
-                const deltaPressX = t.clientX - pressStartX;
-                if (Math.abs(deltaPressX) > 6 || Math.abs(deltaPressY) > 6) {
-                    movedDuringPress = true;
-                    if (!dragging) {
+                if (!dragging) {
+                    const deltaPressY = t.clientY - pressStartY;
+                    const deltaPressX = t.clientX - pressStartX;
+                    // Si se mueve más de 10px antes de los 350ms, cancelamos el drag para permitir scroll
+                    if (Math.abs(deltaPressX) > 10 || Math.abs(deltaPressY) > 10) {
+                        movedDuringPress = true;
                         clearTimeout(longPressTimer);
                     }
-                }
-
-                if (!dragging) {
-                    // Dejar que el usuario haga scroll normal mientras aún no hay drag
                     return;
                 }
 
+                // Si estamos en modo dragging, bloqueamos el scroll y movemos la tarjeta
                 ev.preventDefault();
-                const deltaY = t.clientY - dragStartY;
-                const deltaX = t.clientX - dragStartX;
-                card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+                
+                // Usamos requestAnimationFrame para que el movimiento sea a 60fps (suave)
+                requestAnimationFrame(() => {
+                    if (!dragging) return;
+                    const deltaY = t.clientY - dragStartY;
+                    const deltaX = t.clientX - dragStartX;
+                    card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+                });
             }
 
             function onTouchEnd(ev) {
                 clearTimeout(longPressTimer);
                 document.removeEventListener('touchmove', onTouchMove);
                 document.removeEventListener('touchend', onTouchEnd);
+                
                 card.style.zIndex = '';
                 document.body.style.userSelect = '';
                 document.body.style.webkitUserSelect = '';
 
-                const changedTouches = ev.changedTouches && ev.changedTouches[0];
-                const endY = changedTouches ? changedTouches.clientY : pressStartY;
-                const endX = changedTouches ? changedTouches.clientX : pressStartX;
-                const deltaY = endY - dragStartY;
-                const deltaX = endX - dragStartX;
-                card.style.transform = '';
-
                 if (!dragging) {
-                    // Pulsación corta sin drag: abrir detalles si apenas se ha movido.
-                    if (!movedDuringPress) {
-                        showClassDetails(cls.id);
-                    }
+                    if (!movedDuringPress) showClassDetails(cls.id);
                     return;
                 }
 
-                // Vertical: calcular minutos y hacer snap a CONFIG.snapMinutes
+                const changedTouches = ev.changedTouches && ev.changedTouches[0];
+                const endY = changedTouches ? changedTouches.clientY : lastTouchY;
+                const endX = changedTouches ? changedTouches.clientX : lastTouchX;
+                
+                const deltaY = endY - dragStartY;
+                const deltaX = endX - dragStartX;
+                
+                card.style.transform = '';
+                dragging = false;
+
+                // Lógica de guardado (reutilizando tus funciones existentes)
                 const rawDeltaMinutes = Math.round(deltaY / pixelsPerMinute);
                 const snappedMinutes = Math.round(rawDeltaMinutes / CONFIG.snapMinutes) * CONFIG.snapMinutes;
 
@@ -1188,11 +1202,9 @@ function createClassCard(cls) {
 
                 const finalEnd = finalStart + duration;
 
-                // Horizontal: calcular cambio de día (solo si hay rejilla semanal visible)
                 let dayShift = 0;
                 const weekContainer = document.getElementById('weekCalendarContainer');
-                const weekVisible = weekContainer && window.getComputedStyle(weekContainer).display !== 'none';
-                if (weekVisible) {
+                if (weekContainer && window.getComputedStyle(weekContainer).display !== 'none') {
                     dayShift = Math.round(deltaX / dayCellWidth);
                 }
 
@@ -1200,16 +1212,11 @@ function createClassCard(cls) {
                 if (finalDayIndex < 0) finalDayIndex = 0;
                 if (finalDayIndex > 6) finalDayIndex = 6;
 
-                const newStartTime = minutesToTime(finalStart);
-                const newEndTime = minutesToTime(finalEnd);
-                const newDay = CONFIG.days[finalDayIndex];
-                const newDate = getDateForDay(appState.currentWeekStart, finalDayIndex).toISOString();
-
                 markClassPendingSave(cls.id, {
-                    startTime: newStartTime,
-                    endTime: newEndTime,
-                    day: newDay,
-                    date: newDate,
+                    startTime: minutesToTime(finalStart),
+                    endTime: minutesToTime(finalEnd),
+                    day: CONFIG.days[finalDayIndex],
+                    date: getDateForDay(appState.currentWeekStart, finalDayIndex).toISOString()
                 });
             }
 
