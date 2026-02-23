@@ -95,7 +95,7 @@
         <!-- Calendar Section (Monitor View) -->
         <div id="calendarSectionContainer" style="flex: 1;">
             <section class="calendar-section">
-                <!-- Week Navigation -->
+                <!-- Week Navigation / Month Header -->
                 <div class="week-navigation">
                     <button class="btn btn-secondary" id="prevWeekBtn">
                         <span class="btn-icon">←</span>
@@ -103,6 +103,7 @@
                     </button>
                     <div class="week-info">
                         <h2 id="weekTitle">Semana del 13 - 19 Enero 2026</h2>
+                        <div id="monthTitle" class="month-title" aria-hidden="true">Febrero 2026</div>
                         <div style="display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap;">
                             <button class="btn btn-sm" id="todayBtn">Hoy</button>
                             <button class="btn btn-sm" id="copyWeekBtn">Copiar semana →</button>
@@ -151,15 +152,25 @@
                     </div>
                 </div>
 
-                <!-- Calendar Grid -->
-                <div class="calendar-container">
+                <!-- Calendar Grid (weekly, desktop) -->
+                <div class="calendar-container" id="weekCalendarContainer">
                     <div class="calendar-grid" id="calendarGrid">
-                        <!-- Time column -->
-                        <div class="time-column">
-                            <div class="time-header">Hora</div>
-                            <!-- Time slots will be injected here -->
-                        </div>
-                        <!-- Day columns will be injected here -->
+                        <!-- Time column and day columns will be injected here -->
+                    </div>
+                </div>
+
+                <!-- Month Calendar (mobile) -->
+                <div class="month-calendar-wrapper" id="monthCalendarWrapper">
+                    <div class="month-calendar-grid" id="monthCalendarGrid">
+                        <!-- Monthly day cells injected by JS -->
+                    </div>
+                </div>
+
+                <!-- Selected Day Classes (mobile) -->
+                <div class="day-classes-panel" id="dayClassesPanel">
+                    <h3 class="day-classes-title" id="dayClassesTitle">Clases del día</h3>
+                    <div class="day-classes-list" id="dayClassesList">
+                        <!-- Classes for selected day injected by JS -->
                     </div>
                 </div>
 

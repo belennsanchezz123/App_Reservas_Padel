@@ -755,6 +755,134 @@ body {
 }
 
 /* ==========================================
+   MONTH CALENDAR (MOBILE)
+   ========================================== */
+.month-title {
+    font-size: var(--font-size-base);
+    color: var(--gray-700);
+}
+
+.month-calendar-wrapper {
+    display: none;
+    margin-bottom: var(--spacing-lg);
+}
+
+.month-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+}
+
+.month-day-cell {
+    background: white;
+    border-radius: var(--radius-sm);
+    padding: 0.35rem;
+    min-height: 52px;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    cursor: pointer;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+.month-day-cell.empty {
+    background: transparent;
+    box-shadow: none;
+    cursor: default;
+}
+
+.month-day-cell.has-classes {
+    border: 1px solid var(--primary-green-light);
+}
+
+.month-day-cell.today {
+    border: 2px solid var(--secondary-blue-light);
+}
+
+.month-day-cell:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.month-day-number {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--gray-800);
+}
+
+.month-day-badge {
+    margin-top: 4px;
+    font-size: 0.7rem;
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--primary-green-dark);
+    border-radius: 999px;
+    padding: 2px 6px;
+    display: inline-block;
+}
+
+.day-classes-panel {
+    display: none;
+    background: white;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: var(--spacing-lg);
+}
+
+.day-classes-title {
+    font-size: var(--font-size-lg);
+    margin-bottom: var(--spacing-md);
+    color: var(--gray-900);
+}
+
+.day-classes-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.day-classes-empty {
+    color: var(--gray-500);
+    font-size: var(--font-size-sm);
+}
+
+.day-class-item {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-md);
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    cursor: pointer;
+    transition: background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.day-class-item:hover {
+    background: #ecfeff;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+.day-class-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: 2px;
+}
+
+.day-class-time {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.day-class-occupancy {
+    font-size: 0.8rem;
+    color: var(--gray-600);
+}
+
+.day-class-students {
+    font-size: 0.8rem;
+    color: var(--gray-700);
+}
+
+/* ==========================================
    MODALS
    ========================================== */
 .modal {
@@ -1088,6 +1216,20 @@ form {
 
     .calendar-grid {
         font-size: var(--font-size-xs);
+    }
+
+    /* En móvil priorizamos la vista mensual + lista diaria */
+    #weekCalendarContainer {
+        display: none;
+    }
+
+    .month-calendar-wrapper {
+        display: block;
+    }
+
+    .day-classes-panel {
+        display: block;
+        margin-top: var(--spacing-md);
     }
 
     .form-row {

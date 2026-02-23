@@ -6,6 +6,8 @@ const appState = {
     students: [],
     classes: [],
     currentWeekStart: null,
+    currentMonthDate: null,
+    selectedDayDate: null,
     selectedClass: null,
     editingStudent: null,
     monitors: [],
@@ -50,6 +52,20 @@ function formatDate(date) {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const year = d.getFullYear();
     return `${day}/${month}/${year}`;
+}
+
+function formatDateISO(date) {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function formatMonthYearSpanish(date) {
+    const d = new Date(date);
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    return `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 function getMonday(date) {
@@ -634,21 +650,178 @@ function loadFromLocalStorage() {
 
 function renderCalendar() {
     const grid = document.getElementById('calendarGrid');
-    if (!grid) {
-        console.warn('renderCalendar: element #calendarGrid not found');
-        return;
-    }
-    grid.innerHTML = '';
+    const monthGrid = document.getElementById('monthCalendarGrid');
 
     if (!appState.currentWeekStart) {
         appState.currentWeekStart = getMonday(new Date());
     }
 
-    renderTimeColumn(grid);
-
-    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-        renderDayColumn(grid, dayIndex);
+    if (!appState.currentMonthDate) {
+        appState.currentMonthDate = new Date();
     }
+
+    const isMobile = window.innerWidth <= 768;
+
+    if (isMobile && monthGrid) {
+        renderMonthCalendar();
+    }
+
+    if (grid) {
+        grid.innerHTML = '';
+
+        renderTimeColumn(grid);
+
+        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+            renderDayColumn(grid, dayIndex);
+        }
+    } else {
+        console.warn('renderCalendar: element #calendarGrid not found');
+    }
+}
+
+function getClassesForDate(targetDate) {
+    const target = new Date(targetDate);
+
+    let classes = appState.classes.filter(cls => {
+        if (!cls.date) return false;
+        return isSameCalendarDay(cls.date, target);
+    });
+
+    if (isMonitor()) {
+        const currentUser = getCurrentUser();
+        classes = classes.filter(cls => cls.monitorId === currentUser.id);
+    }
+
+    if (isCoordinator() && appState.viewingMonitorId) {
+        classes = classes.filter(cls => cls.monitorId === appState.viewingMonitorId);
+    }
+
+    classes.sort((a, b) => timeStringToMinutes(a.startTime) - timeStringToMinutes(b.startTime));
+    return classes;
+}
+
+function renderMonthCalendar() {
+    const monthGrid = document.getElementById('monthCalendarGrid');
+    if (!monthGrid) return;
+
+    const baseDate = new Date(appState.currentMonthDate || new Date());
+    const year = baseDate.getFullYear();
+    const month = baseDate.getMonth();
+
+    const firstOfMonth = new Date(year, month, 1);
+    const startDay = (firstOfMonth.getDay() + 6) % 7; // 0 = lunes
+
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const monthTitleEl = document.getElementById('monthTitle');
+    if (monthTitleEl) {
+        monthTitleEl.textContent = formatMonthYearSpanish(baseDate);
+        monthTitleEl.setAttribute('aria-hidden', 'false');
+    }
+
+    monthGrid.innerHTML = '';
+
+    const todayStr = formatDateISO(new Date());
+
+    const totalCells = Math.ceil((startDay + daysInMonth) / 7) * 7;
+    for (let cellIndex = 0; cellIndex < totalCells; cellIndex++) {
+        const cell = document.createElement('div');
+        cell.className = 'month-day-cell';
+
+        const dayNumber = cellIndex - startDay + 1;
+        if (dayNumber < 1 || dayNumber > daysInMonth) {
+            cell.classList.add('empty');
+            monthGrid.appendChild(cell);
+            continue;
+        }
+
+        const cellDate = new Date(year, month, dayNumber);
+        const cellDateStr = formatDateISO(cellDate);
+
+        const classesForDay = getClassesForDate(cellDate);
+
+        const hasClasses = classesForDay.length > 0;
+        if (hasClasses) cell.classList.add('has-classes');
+
+        if (cellDateStr === todayStr) {
+            cell.classList.add('today');
+        }
+
+        const dayLabel = document.createElement('div');
+        dayLabel.className = 'month-day-number';
+        dayLabel.textContent = String(dayNumber);
+        cell.appendChild(dayLabel);
+
+        if (hasClasses) {
+            const badge = document.createElement('div');
+            badge.className = 'month-day-badge';
+            badge.textContent = `${classesForDay.length} clase${classesForDay.length !== 1 ? 's' : ''}`;
+            cell.appendChild(badge);
+        }
+
+        cell.addEventListener('click', () => {
+            appState.selectedDayDate = cellDate.toISOString();
+            renderDayClassesPanel(cellDate);
+        });
+
+        monthGrid.appendChild(cell);
+    }
+
+    if (!appState.selectedDayDate) {
+        appState.selectedDayDate = new Date(year, month, new Date().getDate()).toISOString();
+    }
+    renderDayClassesPanel(new Date(appState.selectedDayDate));
+}
+
+function renderDayClassesPanel(date) {
+    const panel = document.getElementById('dayClassesPanel');
+    const titleEl = document.getElementById('dayClassesTitle');
+    const listEl = document.getElementById('dayClassesList');
+    if (!panel || !titleEl || !listEl) return;
+
+    const d = new Date(date);
+    const weekdayIndex = (d.getDay() + 6) % 7; // 0=Lunes
+    const weekdayName = CONFIG.days[weekdayIndex];
+
+    titleEl.textContent = `${weekdayName} ${formatDate(d)}`;
+
+    const classesForDay = getClassesForDate(d);
+    listEl.innerHTML = '';
+
+    if (classesForDay.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'day-classes-empty';
+        empty.textContent = 'No hay clases para este día.';
+        listEl.appendChild(empty);
+        return;
+    }
+
+    classesForDay.forEach(cls => {
+        const item = document.createElement('div');
+        item.className = 'day-class-item';
+        const studentsCount = cls.students.length;
+        const maxCapacity = cls.maxCapacity;
+
+        const studentNames = cls.students
+            .map(id => getStudentById(id))
+            .filter(Boolean)
+            .map(s => s.name)
+            .join(', ');
+
+        item.innerHTML = `
+            <div class="day-class-main">
+                <div class="day-class-time">${cls.startTime} - ${cls.endTime}</div>
+                <div class="day-class-occupancy">${studentsCount}/${maxCapacity} alumnos</div>
+            </div>
+            <div class="day-class-students">${studentNames || 'Sin alumnos asignados'}</div>
+        `;
+
+        item.addEventListener('click', () => {
+            showClassDetails(cls.id);
+        });
+
+        listEl.appendChild(item);
+    });
 }
 
 function renderTimeColumn(grid) {
