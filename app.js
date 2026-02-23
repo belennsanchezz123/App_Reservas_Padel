@@ -773,11 +773,20 @@ function renderMonthCalendar() {
     renderDayClassesPanel(new Date(appState.selectedDayDate));
 }
 
+function getClassesForDateAndHour(date, hour) {
+    const classesForDay = getClassesForDate(date);
+    return classesForDay.filter(cls => {
+        if (!cls.startTime) return false;
+        const startHour = parseInt(cls.startTime.split(':')[0], 10);
+        return startHour === hour;
+    });
+}
+
 function renderDayClassesPanel(date) {
     const panel = document.getElementById('dayClassesPanel');
     const titleEl = document.getElementById('dayClassesTitle');
-    const listEl = document.getElementById('dayClassesList');
-    if (!panel || !titleEl || !listEl) return;
+    const gridEl = document.getElementById('dayViewGrid');
+    if (!panel || !titleEl || !gridEl) return;
 
     const d = new Date(date);
     const weekdayIndex = (d.getDay() + 6) % 7; // 0=Lunes
@@ -786,42 +795,45 @@ function renderDayClassesPanel(date) {
     titleEl.textContent = `${weekdayName} ${formatDate(d)}`;
 
     const classesForDay = getClassesForDate(d);
-    listEl.innerHTML = '';
+    gridEl.innerHTML = '';
 
     if (classesForDay.length === 0) {
         const empty = document.createElement('p');
         empty.className = 'day-classes-empty';
         empty.textContent = 'No hay clases para este día.';
-        listEl.appendChild(empty);
+        gridEl.appendChild(empty);
         return;
     }
 
-    classesForDay.forEach(cls => {
-        const item = document.createElement('div');
-        item.className = 'day-class-item';
-        const studentsCount = cls.students.length;
-        const maxCapacity = cls.maxCapacity;
+    const timeColumn = document.createElement('div');
+    timeColumn.className = 'time-column day-view-time-column';
 
-        const studentNames = cls.students
-            .map(id => getStudentById(id))
-            .filter(Boolean)
-            .map(s => s.name)
-            .join(', ');
+    const dayColumn = document.createElement('div');
+    dayColumn.className = 'day-column day-view-day-column';
 
-        item.innerHTML = `
-            <div class="day-class-main">
-                <div class="day-class-time">${cls.startTime} - ${cls.endTime}</div>
-                <div class="day-class-occupancy">${studentsCount}/${maxCapacity} alumnos</div>
-            </div>
-            <div class="day-class-students">${studentNames || 'Sin alumnos asignados'}</div>
-        `;
+    for (let hour = CONFIG.hoursStart; hour < CONFIG.hoursEnd; hour++) {
+        const timeSlot = document.createElement('div');
+        timeSlot.className = 'time-slot';
+        timeSlot.textContent = `${String(hour).padStart(2, '0')}:00`;
+        timeColumn.appendChild(timeSlot);
 
-        item.addEventListener('click', () => {
-            showClassDetails(cls.id);
-        });
+        const cell = document.createElement('div');
+        cell.className = 'calendar-cell';
 
-        listEl.appendChild(item);
-    });
+        const classesInSlot = getClassesForDateAndHour(d, hour);
+        if (classesInSlot.length > 0) {
+            classesInSlot.forEach(cls => {
+                const classCard = createClassCard(cls);
+                cell.appendChild(classCard);
+            });
+            cell.classList.add('has-class');
+        }
+
+        dayColumn.appendChild(cell);
+    }
+
+    gridEl.appendChild(timeColumn);
+    gridEl.appendChild(dayColumn);
 }
 
 function renderTimeColumn(grid) {
