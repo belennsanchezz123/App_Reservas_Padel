@@ -1111,26 +1111,39 @@ function createClassCard(cls) {
             let movedDuringPress = false;
             let dragStartX = pressStartX;
             let dragStartY = pressStartY;
+            let lastTouchX = pressStartX;
+            let lastTouchY = pressStartY;
 
             card.style.zIndex = 9999;
 
             const longPressDelay = 350; // ms para considerar pulsación prolongada
             const longPressTimer = setTimeout(() => {
+                // Si el dedo ya se ha movido demasiado, no entramos en modo drag
+                if (movedDuringPress) return;
                 dragging = true;
+                dragStartX = lastTouchX;
+                dragStartY = lastTouchY;
+                document.body.style.userSelect = 'none';
+                document.body.style.webkitUserSelect = 'none';
             }, longPressDelay);
 
             function onTouchMove(ev) {
                 const t = ev.touches[0];
                 if (!t) return;
+                lastTouchX = t.clientX;
+                lastTouchY = t.clientY;
+
                 const deltaPressY = t.clientY - pressStartY;
                 const deltaPressX = t.clientX - pressStartX;
                 if (Math.abs(deltaPressX) > 6 || Math.abs(deltaPressY) > 6) {
                     movedDuringPress = true;
+                    if (!dragging) {
+                        clearTimeout(longPressTimer);
+                    }
                 }
 
                 if (!dragging) {
-                    // Si el usuario se ha desplazado antes de la pulsación larga,
-                    // cancelamos el drag y dejamos que haga scroll normal.
+                    // Dejar que el usuario haga scroll normal mientras aún no hay drag
                     return;
                 }
 
@@ -1145,6 +1158,8 @@ function createClassCard(cls) {
                 document.removeEventListener('touchmove', onTouchMove);
                 document.removeEventListener('touchend', onTouchEnd);
                 card.style.zIndex = '';
+                document.body.style.userSelect = '';
+                document.body.style.webkitUserSelect = '';
 
                 const changedTouches = ev.changedTouches && ev.changedTouches[0];
                 const endY = changedTouches ? changedTouches.clientY : pressStartY;
@@ -1162,7 +1177,7 @@ function createClassCard(cls) {
                 }
 
                 // Vertical: calcular minutos y hacer snap a CONFIG.snapMinutes
-                const rawDeltaMinutes = Math.round(deltaY / (slotHeight / 60));
+                const rawDeltaMinutes = Math.round(deltaY / pixelsPerMinute);
                 const snappedMinutes = Math.round(rawDeltaMinutes / CONFIG.snapMinutes) * CONFIG.snapMinutes;
 
                 let finalStart = initialStartMinutes + snappedMinutes;
@@ -1174,7 +1189,13 @@ function createClassCard(cls) {
                 const finalEnd = finalStart + duration;
 
                 // Horizontal: calcular cambio de día (solo si hay rejilla semanal visible)
-                const dayShift = Math.round(deltaX / dayCellWidth);
+                let dayShift = 0;
+                const weekContainer = document.getElementById('weekCalendarContainer');
+                const weekVisible = weekContainer && window.getComputedStyle(weekContainer).display !== 'none';
+                if (weekVisible) {
+                    dayShift = Math.round(deltaX / dayCellWidth);
+                }
+
                 let finalDayIndex = initialDayIndex + dayShift;
                 if (finalDayIndex < 0) finalDayIndex = 0;
                 if (finalDayIndex > 6) finalDayIndex = 6;

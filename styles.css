@@ -606,6 +606,9 @@ body {
     overflow: hidden;
     transition: all var(--transition-normal);
     z-index: 1;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: none;
 }
 
 .class-card::before {
