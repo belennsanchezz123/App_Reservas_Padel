@@ -1088,7 +1088,8 @@ function createClassCard(cls) {
 
     // Drag-to-move logic en dispositivos táctiles (touch) con pulsación prolongada:
     // toque corto → abre detalles; mantener pulsado unos ms → entra en modo arrastre.
-    // Drag-to-move logic en dispositivos táctiles (touch) corregido
+    // El movimiento queda limitado al área de la columna de día para que
+    // la tarjeta no se pueda arrastrar por toda la interfaz.
     if (isTouchDevice()) {
         card.addEventListener('touchstart', (startEvent) => {
             const touch = startEvent.touches[0];
@@ -1109,10 +1110,16 @@ function createClassCard(cls) {
 
             let dragging = false;
             let movedDuringPress = false;
-            
+
             // Estas variables guardarán el punto de origen exacto del arrastre
             let dragStartX = 0;
             let dragStartY = 0;
+
+            // Límites del arrastre dentro de la columna de día
+            let minDeltaY = -Infinity;
+            let maxDeltaY = Infinity;
+            let minDeltaX = -Infinity;
+            let maxDeltaX = Infinity;
 
             card.style.zIndex = 9999;
 
@@ -1121,11 +1128,22 @@ function createClassCard(cls) {
                 if (movedDuringPress) return;
                 
                 dragging = true;
-                // CRUCIAL: Capturamos la posición actual del dedo justo cuando 
+                // Capturamos la posición actual del dedo justo cuando 
                 // se activa el drag para que el movimiento empiece desde 0
                 dragStartX = lastTouchX;
                 dragStartY = lastTouchY;
-                
+
+                // Calculamos los límites permitidos dentro de la columna de día
+                const cardRect = card.getBoundingClientRect();
+                const containerEl = card.closest('.day-view-day-column') || card.closest('.day-column');
+                if (containerEl) {
+                    const containerRect = containerEl.getBoundingClientRect();
+                    minDeltaY = containerRect.top - cardRect.top;
+                    maxDeltaY = containerRect.bottom - cardRect.bottom;
+                    minDeltaX = containerRect.left - cardRect.left;
+                    maxDeltaX = containerRect.right - cardRect.right;
+                }
+
                 document.body.style.userSelect = 'none';
                 document.body.style.webkitUserSelect = 'none';
                 
@@ -1135,6 +1153,10 @@ function createClassCard(cls) {
 
             let lastTouchX = pressStartX;
             let lastTouchY = pressStartY;
+
+            // Últimos desplazamientos efectivos (clampados a los límites)
+            let lastDragDeltaX = 0;
+            let lastDragDeltaY = 0;
 
             function onTouchMove(ev) {
                 const t = ev.touches[0];
@@ -1160,8 +1182,16 @@ function createClassCard(cls) {
                 // Usamos requestAnimationFrame para que el movimiento sea a 60fps (suave)
                 requestAnimationFrame(() => {
                     if (!dragging) return;
-                    const deltaY = t.clientY - dragStartY;
-                    const deltaX = t.clientX - dragStartX;
+                    let deltaY = t.clientY - dragStartY;
+                    let deltaX = t.clientX - dragStartX;
+
+                    // Limitar movimiento a la columna de día
+                    deltaY = Math.min(Math.max(deltaY, minDeltaY), maxDeltaY);
+                    deltaX = Math.min(Math.max(deltaX, minDeltaX), maxDeltaX);
+
+                    lastDragDeltaY = deltaY;
+                    lastDragDeltaX = deltaX;
+
                     card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
                 });
             }
@@ -1180,12 +1210,10 @@ function createClassCard(cls) {
                     return;
                 }
 
-                const changedTouches = ev.changedTouches && ev.changedTouches[0];
-                const endY = changedTouches ? changedTouches.clientY : lastTouchY;
-                const endX = changedTouches ? changedTouches.clientX : lastTouchX;
-                
-                const deltaY = endY - dragStartY;
-                const deltaX = endX - dragStartX;
+                // Usamos los últimos desplazamientos clampados para que
+                // el resultado coincida visualmente con la posición final.
+                const deltaY = lastDragDeltaY;
+                const deltaX = lastDragDeltaX;
                 
                 card.style.transform = '';
                 dragging = false;
