@@ -1086,8 +1086,8 @@ function createClassCard(cls) {
         document.addEventListener('mouseup', onMouseUp);
     });
 
-    // Drag-to-move logic en dispositivos táctiles (touch):
-    // arrastrar verticalmente cambia la hora, horizontalmente cambia el día.
+    // Drag-to-move logic en dispositivos táctiles (touch) con pulsación prolongada:
+    // toque corto → abre detalles; mantener pulsado unos ms → entra en modo arrastre.
     if (isTouchDevice()) {
         card.addEventListener('touchstart', (startEvent) => {
             const touch = startEvent.touches[0];
@@ -1101,46 +1101,68 @@ function createClassCard(cls) {
             const sampleCell = document.querySelector('.calendar-cell');
             const dayCellWidth = sampleCell ? sampleCell.getBoundingClientRect().width : 140;
 
-            const startY = touch.clientY;
-            const startX = touch.clientX;
+            const pressStartX = touch.clientX;
+            const pressStartY = touch.clientY;
             const initialStartMinutes = startMinutes;
             const duration = durationMinutes;
             const initialDayIndex = CONFIG.days.indexOf(cls.day);
 
-            let moved = false;
+            let dragging = false;
+            let movedDuringPress = false;
+            let dragStartX = pressStartX;
+            let dragStartY = pressStartY;
 
             card.style.zIndex = 9999;
+
+            const longPressDelay = 350; // ms para considerar pulsación prolongada
+            const longPressTimer = setTimeout(() => {
+                dragging = true;
+            }, longPressDelay);
 
             function onTouchMove(ev) {
                 const t = ev.touches[0];
                 if (!t) return;
-                const deltaY = t.clientY - startY;
-                const deltaX = t.clientX - startX;
-                if (Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4) moved = true;
+                const deltaPressY = t.clientY - pressStartY;
+                const deltaPressX = t.clientX - pressStartX;
+                if (Math.abs(deltaPressX) > 6 || Math.abs(deltaPressY) > 6) {
+                    movedDuringPress = true;
+                }
+
+                if (!dragging) {
+                    // Si el usuario se ha desplazado antes de la pulsación larga,
+                    // cancelamos el drag y dejamos que haga scroll normal.
+                    return;
+                }
+
+                ev.preventDefault();
+                const deltaY = t.clientY - dragStartY;
+                const deltaX = t.clientX - dragStartX;
                 card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
             }
 
             function onTouchEnd(ev) {
+                clearTimeout(longPressTimer);
                 document.removeEventListener('touchmove', onTouchMove);
                 document.removeEventListener('touchend', onTouchEnd);
                 card.style.zIndex = '';
 
-                // Reset transform visual
                 const changedTouches = ev.changedTouches && ev.changedTouches[0];
-                const endY = changedTouches ? changedTouches.clientY : startY;
-                const endX = changedTouches ? changedTouches.clientX : startX;
-                const deltaY = endY - startY;
-                const deltaX = endX - startX;
+                const endY = changedTouches ? changedTouches.clientY : pressStartY;
+                const endX = changedTouches ? changedTouches.clientX : pressStartX;
+                const deltaY = endY - dragStartY;
+                const deltaX = endX - dragStartX;
                 card.style.transform = '';
 
-                if (!moved) {
-                    // Tratar como toque simple: abrir detalles
-                    showClassDetails(cls.id);
+                if (!dragging) {
+                    // Pulsación corta sin drag: abrir detalles si apenas se ha movido.
+                    if (!movedDuringPress) {
+                        showClassDetails(cls.id);
+                    }
                     return;
                 }
 
                 // Vertical: calcular minutos y hacer snap a CONFIG.snapMinutes
-                const rawDeltaMinutes = Math.round(deltaY / pixelsPerMinute);
+                const rawDeltaMinutes = Math.round(deltaY / (slotHeight / 60));
                 const snappedMinutes = Math.round(rawDeltaMinutes / CONFIG.snapMinutes) * CONFIG.snapMinutes;
 
                 let finalStart = initialStartMinutes + snappedMinutes;
@@ -1151,7 +1173,7 @@ function createClassCard(cls) {
 
                 const finalEnd = finalStart + duration;
 
-                // Horizontal: calcular cambio de día
+                // Horizontal: calcular cambio de día (solo si hay rejilla semanal visible)
                 const dayShift = Math.round(deltaX / dayCellWidth);
                 let finalDayIndex = initialDayIndex + dayShift;
                 if (finalDayIndex < 0) finalDayIndex = 0;
@@ -1162,7 +1184,6 @@ function createClassCard(cls) {
                 const newDay = CONFIG.days[finalDayIndex];
                 const newDate = getDateForDay(appState.currentWeekStart, finalDayIndex).toISOString();
 
-                // Aplicar cambios y marcar como pendiente de guardar
                 markClassPendingSave(cls.id, {
                     startTime: newStartTime,
                     endTime: newEndTime,
@@ -1171,13 +1192,15 @@ function createClassCard(cls) {
                 });
             }
 
-            document.addEventListener('touchmove', onTouchMove);
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
             document.addEventListener('touchend', onTouchEnd);
         });
     }
 
     card.addEventListener('click', (e) => {
         e.stopPropagation();
+        // En dispositivos táctiles el tap ya se gestiona en touchend.
+        if (isTouchDevice()) return;
         showClassDetails(cls.id);
     });
 
