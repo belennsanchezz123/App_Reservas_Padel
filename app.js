@@ -1080,6 +1080,12 @@ function createClassCard(cls) {
                 return;
             }
 
+            // Comprobar solapamiento con otra clase antes de aplicar cambios
+            if (hasClassTimeConflict(newDate, newStartTime, newEndTime, cls.id)) {
+                showToast('No se puede mover la clase: ya hay otra en ese horario', 'error');
+                return;
+            }
+
             // Update class locally first and mark pending save
             markClassPendingSave(cls.id, { startTime: newStartTime, endTime: newEndTime, day: newDay, date: newDate });
         }
@@ -1266,11 +1272,21 @@ function createClassCard(cls) {
                 if (finalDayIndex < 0) finalDayIndex = 0;
                 if (finalDayIndex > 6) finalDayIndex = 6;
 
+                const candidateStart = minutesToTime(finalStart);
+                const candidateEnd = minutesToTime(finalEnd);
+                const candidateDate = getDateForDay(appState.currentWeekStart, finalDayIndex).toISOString();
+
+                // Comprobar solapamiento con otra clase antes de aplicar cambios
+                if (hasClassTimeConflict(candidateDate, candidateStart, candidateEnd, cls.id)) {
+                    showToast('No se puede mover la clase: ya hay otra en ese horario', 'error');
+                    return;
+                }
+
                 markClassPendingSave(cls.id, {
-                    startTime: minutesToTime(finalStart),
-                    endTime: minutesToTime(finalEnd),
+                    startTime: candidateStart,
+                    endTime: candidateEnd,
                     day: CONFIG.days[finalDayIndex],
-                    date: getDateForDay(appState.currentWeekStart, finalDayIndex).toISOString()
+                    date: candidateDate
                 });
             }
 
