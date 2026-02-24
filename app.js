@@ -1123,6 +1123,9 @@ function createClassCard(cls) {
             let minDeltaX = -Infinity;
             let maxDeltaX = Infinity;
 
+            // Contenedor que se desplazará (scroll) cuando arrastremos cerca de sus bordes
+            let scrollContainer = null;
+
             card.style.zIndex = 9999;
 
             const longPressDelay = 350; 
@@ -1144,6 +1147,9 @@ function createClassCard(cls) {
                     maxDeltaY = containerRect.bottom - cardRect.bottom;
                     minDeltaX = containerRect.left - cardRect.left;
                     maxDeltaX = containerRect.right - cardRect.right;
+
+                    // El contenedor scrollable principal será la rejilla de vista de día, si existe
+                    scrollContainer = containerEl.closest('.day-view-grid') || containerEl.parentElement;
                 }
 
                 document.body.style.userSelect = 'none';
@@ -1164,14 +1170,14 @@ function createClassCard(cls) {
             function onTouchMove(ev) {
                 const t = ev.touches[0];
                 if (!t) return;
-                
+
                 lastTouchX = t.clientX;
                 lastTouchY = t.clientY;
 
                 if (!dragging) {
                     const deltaPressY = t.clientY - pressStartY;
                     const deltaPressX = t.clientX - pressStartX;
-                    // Si se mueve más de 10px antes de los 350ms, cancelamos el drag para permitir scroll
+                    // Si se mueve más de 10px antes de los 350ms, cancelamos el drag para permitir scroll normal
                     if (Math.abs(deltaPressX) > 10 || Math.abs(deltaPressY) > 10) {
                         movedDuringPress = true;
                         clearTimeout(longPressTimer);
@@ -1179,32 +1185,26 @@ function createClassCard(cls) {
                     return;
                 }
 
-                // Auto-scroll cuando el dedo se acerca a los bordes de la pantalla
-                const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-                const edgeThreshold = 80; // px desde el borde para activar auto-scroll
-                let scrollDelta = 0;
+                // En modo arrastre bloqueamos el scroll de la página y
+                // desplazamos solo el contenedor de horas si nos acercamos a sus bordes
+                ev.preventDefault();
 
-                if (lastTouchY > viewportHeight - edgeThreshold) {
-                    scrollDelta = 10; // scroll hacia abajo
-                } else if (lastTouchY < edgeThreshold) {
-                    scrollDelta = -10; // scroll hacia arriba
-                }
+                if (scrollContainer) {
+                    const rect = scrollContainer.getBoundingClientRect();
+                    const edgeThreshold = 60; // px desde el borde superior/inferior del contenedor
+                    let scrollDelta = 0;
 
-                if (scrollDelta !== 0) {
-                    const prevScrollY = window.scrollY;
-                    window.scrollBy(0, scrollDelta);
-                    const newScrollY = window.scrollY;
-                    const appliedDelta = newScrollY - prevScrollY;
-                    if (appliedDelta !== 0) {
-                        // Ajustamos el origen del drag para compensar el scroll
-                        dragStartY += appliedDelta;
-                        lastScrollY = newScrollY;
+                    if (lastTouchY > rect.bottom - edgeThreshold) {
+                        scrollDelta = 10; // desplazar horas hacia abajo
+                    } else if (lastTouchY < rect.top + edgeThreshold) {
+                        scrollDelta = -10; // desplazar horas hacia arriba
+                    }
+
+                    if (scrollDelta !== 0) {
+                        scrollContainer.scrollTop += scrollDelta;
                     }
                 }
 
-                // Si estamos en modo dragging, bloqueamos el scroll y movemos la tarjeta
-                ev.preventDefault();
-                
                 // Usamos requestAnimationFrame para que el movimiento sea a 60fps (suave)
                 requestAnimationFrame(() => {
                     if (!dragging) return;
