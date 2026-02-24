@@ -755,7 +755,8 @@ function renderMonthCalendar() {
         if (hasClasses) {
             const badge = document.createElement('div');
             badge.className = 'month-day-badge';
-            badge.textContent = `${classesForDay.length} clase${classesForDay.length !== 1 ? 's' : ''}`;
+            // En móvil solo mostramos el número de clases (ej: "3")
+            badge.textContent = `${classesForDay.length}`;
             cell.appendChild(badge);
         }
 

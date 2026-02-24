@@ -1301,6 +1301,21 @@ form {
         justify-content: center;
     }
 
+    /* Hacer el selector de mes más visible y fácil de pulsar en móvil */
+    #monthSelector {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+    }
+
+    #monthSelectorButton {
+        width: 100%;
+        justify-content: center;
+        padding: 6px 10px;
+        border: 1px solid var(--gray-200);
+        background: white;
+    }
+
     .calendar-grid {
         font-size: var(--font-size-xs);
     }
