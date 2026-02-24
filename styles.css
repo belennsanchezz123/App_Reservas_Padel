@@ -414,6 +414,17 @@ body {
     box-shadow: var(--shadow-md);
 }
 
+/* Ocultar controles de navegación semanal (prev/next, semana, hoy, copiar, snap)
+   en todas las vistas para dejar solo el mes y el calendario */
+#prevWeekBtn,
+#nextWeekBtn,
+#weekTitle,
+#todayBtn,
+#copyWeekBtn,
+#snapToggleBtn {
+    display: none !important;
+}
+
 .week-info {
     display: flex;
     flex-direction: column;
@@ -1308,6 +1319,16 @@ form {
     .quick-actions .btn {
         width: 100%;
         justify-content: center;
+    }
+
+    /* En móvil ocultamos la navegación semanal: solo mes + calendario */
+    #prevWeekBtn,
+    #nextWeekBtn,
+    #weekTitle,
+    #todayBtn,
+    #copyWeekBtn,
+    #snapToggleBtn {
+        display: none !important;
     }
 
     /* Hacer el selector de mes más visible y fácil de pulsar en móvil */
