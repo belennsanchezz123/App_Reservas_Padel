@@ -2045,12 +2045,18 @@ function navigateWeek(direction) {
     const currentWeek = new Date(appState.currentWeekStart);
     currentWeek.setDate(currentWeek.getDate() + (direction * 7));
     appState.currentWeekStart = currentWeek;
+    // Sincronizar mes y día seleccionado con la nueva semana
+    appState.currentMonthDate = new Date(currentWeek);
+    appState.selectedDayDate = currentWeek.toISOString();
     renderWeekTitle();
     renderCalendar();
 }
 
 function goToToday() {
-    appState.currentWeekStart = getMonday(new Date());
+    const today = new Date();
+    appState.currentWeekStart = getMonday(today);
+    appState.currentMonthDate = new Date(today);
+    appState.selectedDayDate = today.toISOString();
     renderWeekTitle();
     renderCalendar();
 }
@@ -2547,8 +2553,11 @@ async function initializeApp() {
             }
         }
 
-        // Set current week
-        appState.currentWeekStart = getMonday(new Date());
+        // Set current week, month and selected day based on hoy
+        const today = new Date();
+        appState.currentWeekStart = getMonday(today);
+        appState.currentMonthDate = new Date(today);
+        appState.selectedDayDate = today.toISOString();
 
         // Initialize event listeners
         initializeEventListeners();
