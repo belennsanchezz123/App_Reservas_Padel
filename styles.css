@@ -864,7 +864,13 @@ body {
 }
 
 .month-day-cell.today {
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid var(--secondary-blue-light);
+}
+
+.month-day-cell.selected-day {
     border: 2px solid var(--secondary-blue-light);
+    box-shadow: var(--shadow-md);
 }
 
 .month-day-cell:hover {

@@ -722,6 +722,7 @@ function renderMonthCalendar() {
     monthGrid.innerHTML = '';
 
     const todayStr = formatDateISO(new Date());
+    const selectedDayStr = appState.selectedDayDate ? formatDateISO(appState.selectedDayDate) : null;
 
     const totalCells = Math.ceil((startDay + daysInMonth) / 7) * 7;
     for (let cellIndex = 0; cellIndex < totalCells; cellIndex++) {
@@ -747,6 +748,10 @@ function renderMonthCalendar() {
             cell.classList.add('today');
         }
 
+        if (selectedDayStr && cellDateStr === selectedDayStr) {
+            cell.classList.add('selected-day');
+        }
+
         const dayLabel = document.createElement('div');
         dayLabel.className = 'month-day-number';
         dayLabel.textContent = String(dayNumber);
@@ -763,6 +768,8 @@ function renderMonthCalendar() {
         cell.addEventListener('click', () => {
             appState.selectedDayDate = cellDate.toISOString();
             renderDayClassesPanel(cellDate);
+            // Re-render month to actualizar el resaltado del día seleccionado
+            renderMonthCalendar();
         });
 
         monthGrid.appendChild(cell);
