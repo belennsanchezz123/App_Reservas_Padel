@@ -2448,6 +2448,46 @@ function initializeEventListeners() {
     const copyWeekBtnEl = getEl('copyWeekBtn');
     if (copyWeekBtnEl) copyWeekBtnEl.addEventListener('click', copyCurrentWeekToNext);
 
+    // Month selector dropdown
+    const monthSelectorEl = getEl('monthSelector');
+    const monthSelectorButton = getEl('monthSelectorButton');
+    const monthSelectorDropdown = getEl('monthSelectorDropdown');
+
+    if (monthSelectorButton && monthSelectorEl && monthSelectorDropdown) {
+        monthSelectorButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            monthSelectorEl.classList.toggle('open');
+        });
+
+        monthSelectorDropdown.querySelectorAll('li').forEach(li => {
+            li.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const monthIndex = parseInt(li.getAttribute('data-month'), 10);
+                if (isNaN(monthIndex)) return;
+
+                const baseDate = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+                const year = baseDate.getFullYear();
+                const newDate = new Date(year, monthIndex, 1);
+
+                appState.currentMonthDate = newDate;
+                appState.currentWeekStart = getMonday(newDate);
+                appState.selectedDayDate = newDate.toISOString();
+
+                monthSelectorEl.classList.remove('open');
+
+                renderWeekTitle();
+                renderCalendar();
+            });
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!monthSelectorEl.contains(e.target)) {
+                monthSelectorEl.classList.remove('open');
+            }
+        });
+    }
+
     // Snap toggle button (15m / 30m)
     const weekNavEl = document.querySelector('.week-navigation');
     if (weekNavEl && !document.getElementById('snapToggleBtn')) {
