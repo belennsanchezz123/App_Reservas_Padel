@@ -797,15 +797,6 @@ function renderDayClassesPanel(date) {
 
     const classesForDay = getClassesForDate(d);
     gridEl.innerHTML = '';
-
-    if (classesForDay.length === 0) {
-        const empty = document.createElement('p');
-        empty.className = 'day-classes-empty';
-        empty.textContent = 'No hay clases para este día.';
-        gridEl.appendChild(empty);
-        return;
-    }
-
     const timeColumn = document.createElement('div');
     timeColumn.className = 'time-column day-view-time-column';
 
@@ -835,6 +826,9 @@ function renderDayClassesPanel(date) {
 
     gridEl.appendChild(timeColumn);
     gridEl.appendChild(dayColumn);
+
+    // Guardar el día actualmente mostrado para el botón de añadir desde vista diaria
+    appState.selectedDayDate = d.toISOString();
 }
 
 function renderTimeColumn(grid) {
@@ -2544,6 +2538,29 @@ function initializeEventListeners() {
         if (header) header.textContent = 'Añadir Alumno';
         openModal('studentModal');
     });
+
+    // Botón + en la vista diaria móvil: crea una clase en el día mostrado y hora actual
+    const addFromDayViewBtn = getEl('addClassFromDayViewBtn');
+    if (addFromDayViewBtn) {
+        addFromDayViewBtn.addEventListener('click', () => {
+            const now = new Date();
+
+            // Tomar como base el día que se está mostrando en la vista diaria
+            const baseDate = appState.selectedDayDate ? new Date(appState.selectedDayDate) : new Date();
+
+            // Usar la hora actual (redondeada a la hora entera) como referencia
+            const currentHour = now.getHours();
+
+            // Aseguramos que la hora esté dentro del rango de la configuración
+            const clampedHour = Math.min(Math.max(currentHour, CONFIG.hoursStart), CONFIG.hoursEnd - 1);
+
+            const weekdayIndex = (baseDate.getDay() + 6) % 7; // 0=Lunes
+            const weekdayName = CONFIG.days[weekdayIndex];
+
+            // Abrimos el modal de nueva clase con el día y la hora sugeridos
+            openAddClassModal(weekdayName, clampedHour);
+        });
+    }
 
     const closeSidebarBtnEl = getEl('closeSidebarBtn');
     if (closeSidebarBtnEl) {
