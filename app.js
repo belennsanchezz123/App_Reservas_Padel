@@ -88,6 +88,15 @@ async function handleLogin() {
         }
 
         console.log('✅ Login Supabase correcto', data);
+
+		// Una vez autenticado correctamente en Supabase, inicializamos la app
+		// para cargar datos y mostrar la pantalla de rol (coordinador/monitor)
+		// o la vista principal si ya había un usuario guardado.
+		try {
+			await initializeApp();
+		} catch (initError) {
+			console.error('Error al inicializar la app tras el login:', initError);
+		}
     } catch (e) {
         console.error('Excepción en handleLogin:', e);
         errorMsg.textContent = 'Error inesperado al iniciar sesión.';
@@ -95,26 +104,9 @@ async function handleLogin() {
     }
 }
 
-// Al cargar la página, si ya se hizo login antes, ocultamos el overlay
-// Usamos únicamente la sesión real de Supabase (sin flags propios).
-document.addEventListener('DOMContentLoaded', async () => {
-    const loginView = document.getElementById('login-view');
-    if (!loginView) return;
-
-    let alreadyLogged = false;
-
-    if (typeof supabase !== 'undefined' && supabase) {
-        try {
-            const { data, error } = await supabase.auth.getSession();
-            if (!error && data && data.session) {
-                alreadyLogged = true;
-            }
-        } catch (e) {
-            console.warn('No se pudo obtener sesión de Supabase en inicio:', e);
-        }
-    }
-    loginView.style.display = alreadyLogged ? 'none' : 'flex';
-});
+// El control de visibilidad del overlay de login (#login-view)
+// se realiza dentro de initializeApp(), para que el flujo de
+// autenticación y carga de datos esté centralizado.
 
 // ==========================================
 // UTILITY FUNCTIONS
@@ -295,7 +287,9 @@ function logout() {
         loginView.style.display = 'flex';
     }
 
-    showLoginScreen();
+    // Al cerrar sesión, ocultamos la pantalla de rol y la app principal;
+    // el usuario deberá autenticarse de nuevo en Supabase para continuar.
+    hideLoginScreen();
     hideMainApp();
 }
 
@@ -2712,6 +2706,45 @@ function initializeEventListeners() {
 
 async function initializeApp() {
     try {
+        const loginView = document.getElementById('login-view');
+
+        // Si Supabase está disponible, comprobamos primero si hay sesión de Auth.
+        // Si NO hay sesión, mostramos solo el overlay de login y salimos
+        // sin inicializar todavía la app (carga de datos, listeners, etc.).
+        if (typeof supabase !== 'undefined' && supabase) {
+            try {
+                const { data, error } = await supabase.auth.getSession();
+                if (error) {
+                    console.warn('No se pudo obtener la sesión de Supabase al iniciar:', error);
+                }
+
+                const hasSession = data && data.session;
+
+                if (!hasSession) {
+                    if (loginView) loginView.style.display = 'flex';
+
+                    // Nos aseguramos de que la pantalla de rol y la app principal
+                    // no se muestren mientras no haya sesión de Supabase.
+                    hideLoginScreen();
+                    hideMainApp();
+                    return;
+                } else {
+                    if (loginView) loginView.style.display = 'none';
+                }
+            } catch (sessionError) {
+                console.warn('Error comprobando sesión de Supabase al iniciar:', sessionError);
+                // En caso de error inesperado, mostramos el overlay para forzar re-login.
+                if (loginView) loginView.style.display = 'flex';
+                hideLoginScreen();
+                hideMainApp();
+                return;
+            }
+        } else {
+            // Si Supabase no está configurado, ocultamos el overlay de Auth
+            // y dejamos que la app funcione con el flujo local existente.
+            if (loginView) loginView.style.display = 'none';
+        }
+
         // Check if Supabase is configured. If not, fallback to localStorage.
         if (typeof supabase === 'undefined' || !supabase) {
             console.warn('Supabase no está configurado. Usando datos locales (localStorage) como fallback.');
