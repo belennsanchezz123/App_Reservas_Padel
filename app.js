@@ -39,6 +39,51 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // ==========================================
+// SIMPLE EMAIL/PASSWORD LOGIN OVERLAY (index.html #login-view)
+// ==========================================
+
+// Esta función se llama desde el botón "Entrar" del nuevo login
+// que has añadido en index.html. No es un login real de Supabase,
+// solo controla mostrar/ocultar la aplicación y se recuerda en localStorage.
+function handleLogin() {
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const errorMsg = document.getElementById('error-msg');
+
+    if (!emailInput || !passwordInput || !errorMsg) return;
+
+    const email = emailInput.value.trim();
+    const password = passwordInput.value.trim();
+
+    if (!email || !password) {
+        errorMsg.textContent = 'Introduce correo y contraseña.';
+        errorMsg.style.display = 'block';
+        return;
+    }
+
+    // Aquí podrías validar contra unas credenciales fijas si quieres.
+    // De momento aceptamos cualquier combinación no vacía y
+    // guardamos un flag en localStorage para recordar el login.
+    localStorage.setItem('padelApp_dbLogin', 'true');
+
+    const loginView = document.getElementById('login-view');
+    if (loginView) {
+        loginView.style.display = 'none';
+    }
+
+    errorMsg.style.display = 'none';
+}
+
+// Al cargar la página, si ya se hizo login antes, ocultamos el overlay
+document.addEventListener('DOMContentLoaded', () => {
+    const loginView = document.getElementById('login-view');
+    if (!loginView) return;
+
+    const alreadyLogged = localStorage.getItem('padelApp_dbLogin') === 'true';
+    loginView.style.display = alreadyLogged ? 'none' : 'flex';
+});
+
+// ==========================================
 // UTILITY FUNCTIONS
 // ==========================================
 
