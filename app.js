@@ -2727,6 +2727,7 @@ async function initializeApp() {
                     // no se muestren mientras no haya sesión de Supabase.
                     hideLoginScreen();
                     hideMainApp();
+                    hideLoading();
                     return;
                 } else {
                     if (loginView) loginView.style.display = 'none';
@@ -2737,6 +2738,7 @@ async function initializeApp() {
                 if (loginView) loginView.style.display = 'flex';
                 hideLoginScreen();
                 hideMainApp();
+                hideLoading();
                 return;
             }
         } else {
