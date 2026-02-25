@@ -82,9 +82,6 @@ async function handleLogin() {
             return;
         }
 
-        // Login correcto: recordamos estado (opcional) y ocultamos overlay
-        localStorage.setItem('padelApp_dbLogin', 'true');
-
         const loginView = document.getElementById('login-view');
         if (loginView) {
             loginView.style.display = 'none';
@@ -99,7 +96,7 @@ async function handleLogin() {
 }
 
 // Al cargar la página, si ya se hizo login antes, ocultamos el overlay
-// Preferimos la sesión real de Supabase; si falla, usamos el flag local.
+// Usamos únicamente la sesión real de Supabase (sin flags propios).
 document.addEventListener('DOMContentLoaded', async () => {
     const loginView = document.getElementById('login-view');
     if (!loginView) return;
@@ -116,12 +113,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.warn('No se pudo obtener sesión de Supabase en inicio:', e);
         }
     }
-
-    // Si no hay sesión Supabase, miramos el flag local como fallback
-    if (!alreadyLogged) {
-        alreadyLogged = localStorage.getItem('padelApp_dbLogin') === 'true';
-    }
-
     loginView.style.display = alreadyLogged ? 'none' : 'flex';
 });
 
