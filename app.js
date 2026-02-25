@@ -43,9 +43,9 @@ window.addEventListener('DOMContentLoaded', () => {
 // ==========================================
 
 // Esta función se llama desde el botón "Entrar" del nuevo login
-// que has añadido en index.html. No es un login real de Supabase,
-// solo controla mostrar/ocultar la aplicación y se recuerda en localStorage.
-function handleLogin() {
+// que has añadido en index.html. Aquí conectamos de verdad con Supabase Auth
+// usando supabase-js v2 (UMD) para hacer signInWithPassword.
+async function handleLogin() {
     const emailInput = document.getElementById('email');
     const passwordInput = document.getElementById('password');
     const errorMsg = document.getElementById('error-msg');
@@ -61,25 +61,67 @@ function handleLogin() {
         return;
     }
 
-    // Aquí podrías validar contra unas credenciales fijas si quieres.
-    // De momento aceptamos cualquier combinación no vacía y
-    // guardamos un flag en localStorage para recordar el login.
-    localStorage.setItem('padelApp_dbLogin', 'true');
-
-    const loginView = document.getElementById('login-view');
-    if (loginView) {
-        loginView.style.display = 'none';
+    if (typeof supabase === 'undefined' || !supabase) {
+        errorMsg.textContent = 'Supabase no está disponible en esta página.';
+        errorMsg.style.display = 'block';
+        return;
     }
 
-    errorMsg.style.display = 'none';
+    try {
+        errorMsg.style.display = 'none';
+
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+        });
+
+        if (error) {
+            console.error('Error de login Supabase:', error);
+            errorMsg.textContent = error.message || 'Error al iniciar sesión.';
+            errorMsg.style.display = 'block';
+            return;
+        }
+
+        // Login correcto: recordamos estado (opcional) y ocultamos overlay
+        localStorage.setItem('padelApp_dbLogin', 'true');
+
+        const loginView = document.getElementById('login-view');
+        if (loginView) {
+            loginView.style.display = 'none';
+        }
+
+        console.log('✅ Login Supabase correcto', data);
+    } catch (e) {
+        console.error('Excepción en handleLogin:', e);
+        errorMsg.textContent = 'Error inesperado al iniciar sesión.';
+        errorMsg.style.display = 'block';
+    }
 }
 
 // Al cargar la página, si ya se hizo login antes, ocultamos el overlay
-document.addEventListener('DOMContentLoaded', () => {
+// Preferimos la sesión real de Supabase; si falla, usamos el flag local.
+document.addEventListener('DOMContentLoaded', async () => {
     const loginView = document.getElementById('login-view');
     if (!loginView) return;
 
-    const alreadyLogged = localStorage.getItem('padelApp_dbLogin') === 'true';
+    let alreadyLogged = false;
+
+    if (typeof supabase !== 'undefined' && supabase) {
+        try {
+            const { data, error } = await supabase.auth.getSession();
+            if (!error && data && data.session) {
+                alreadyLogged = true;
+            }
+        } catch (e) {
+            console.warn('No se pudo obtener sesión de Supabase en inicio:', e);
+        }
+    }
+
+    // Si no hay sesión Supabase, miramos el flag local como fallback
+    if (!alreadyLogged) {
+        alreadyLogged = localStorage.getItem('padelApp_dbLogin') === 'true';
+    }
+
     loginView.style.display = alreadyLogged ? 'none' : 'flex';
 });
 
@@ -248,6 +290,20 @@ async function login(role, monitorId = null, monitorName = null) {
 function logout() {
     appState.currentUser = null;
     localStorage.removeItem('padelApp_currentUser');
+    localStorage.removeItem('padelApp_dbLogin');
+
+    // Cerrar sesión también en Supabase Auth si está disponible
+    if (typeof supabase !== 'undefined' && supabase) {
+        supabase.auth.signOut().catch(err => {
+            console.warn('Error al cerrar sesión en Supabase:', err);
+        });
+    }
+
+    const loginView = document.getElementById('login-view');
+    if (loginView) {
+        loginView.style.display = 'flex';
+    }
+
     showLoginScreen();
     hideMainApp();
 }
