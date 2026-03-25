@@ -804,22 +804,58 @@ body {
     background: var(--gray-100);
 }
 
-.month-selector-arrow {
-    font-size: 0.75rem;
-    color: var(--gray-500);
+
+.month-selector-button {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    padding: 6px 18px 6px 12px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--gray-800);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    outline: none;
 }
 
-.month-selector-dropdown {
+.month-selector.open .month-selector-dropdown,
+.year-selector.open .year-selector-dropdown {
+    display: block;
+}
+
+.month-selector-dropdown,
+.year-selector-dropdown {
+    display: none;
     position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    margin-top: 4px;
+    top: 110%;
+    left: 0;
+    min-width: 140px;
     background: white;
+    border: 1px solid var(--gray-200);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg);
-    list-style: none;
+    box-shadow: var(--shadow-md);
+    z-index: 1000;
+    max-height: 260px;
+    overflow-y: auto;
     padding: 4px 0;
+}
+
+.month-selector-dropdown li,
+.year-selector-dropdown li {
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 1rem;
+    color: var(--gray-800);
+    transition: background var(--transition-fast);
+}
+.month-selector-dropdown li:hover,
+.year-selector-dropdown li:hover {
+    background: var(--gray-100);
+}
     z-index: 200;
     min-width: 160px;
     max-height: 260px;
@@ -1645,7 +1681,13 @@ form {
     font-size: var(--font-size-xs);
     opacity: 0.9;
     font-weight: 500;
-    margin-top: var(--spacing-xs);
+    margin-top: 18px;
+    margin-left: 8px;
+    margin-bottom: 2px;
+    display: block;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 /* ==========================================

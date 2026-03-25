@@ -63,6 +63,8 @@
 </div>
 
 
+    <div id="app-view" style="display:none">
+
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-spinner"></div>
@@ -154,25 +156,21 @@
                     </button>
                     <div class="week-info">
                         <h2 id="weekTitle">Semana del 13 - 19 Enero 2026</h2>
-                        <div class="month-selector" id="monthSelector">
-                            <button class="month-selector-button" id="monthSelectorButton" type="button">
-                                <span id="monthTitle" class="month-title" aria-hidden="true">Febrero 2026</span>
-                                <span class="month-selector-arrow">▾</span>
-                            </button>
-                            <ul class="month-selector-dropdown" id="monthSelectorDropdown">
-                                <li data-month="0">Enero</li>
-                                <li data-month="1">Febrero</li>
-                                <li data-month="2">Marzo</li>
-                                <li data-month="3">Abril</li>
-                                <li data-month="4">Mayo</li>
-                                <li data-month="5">Junio</li>
-                                <li data-month="6">Julio</li>
-                                <li data-month="7">Agosto</li>
-                                <li data-month="8">Septiembre</li>
-                                <li data-month="9">Octubre</li>
-                                <li data-month="10">Noviembre</li>
-                                <li data-month="11">Diciembre</li>
-                            </ul>
+                        <div class="month-year-selector" id="monthYearSelector" style="display:flex; gap:8px; align-items:center;">
+                            <div class="month-selector" id="monthSelector" style="position:relative;">
+                                <button class="month-selector-button" id="monthSelectorButton" type="button">
+                                    <span id="monthTitle" class="month-title" aria-hidden="true">Febrero</span>
+                                    <span class="month-selector-arrow">▾</span>
+                                </button>
+                                <ul class="month-selector-dropdown" id="monthSelectorDropdown"></ul>
+                            </div>
+                            <div class="year-selector" id="yearSelector" style="position:relative;">
+                                <button class="month-selector-button" id="yearSelectorButton" type="button">
+                                    <span id="yearTitle" class="year-title" aria-hidden="true">2026</span>
+                                    <span class="month-selector-arrow">▾</span>
+                                </button>
+                                <ul class="year-selector-dropdown" id="yearSelectorDropdown"></ul>
+                            </div>
                         </div>
                         <div style="display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap;">
                             <button class="btn btn-sm" id="todayBtn">Hoy</button>
@@ -527,6 +525,8 @@
 
     <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
+
+    </div><!-- end app-view -->
 
     <!-- Scripts: Load order is CRITICAL -->
     <!-- 1. First load Supabase library from local node_modules -->

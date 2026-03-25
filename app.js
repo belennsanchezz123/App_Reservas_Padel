@@ -1017,6 +1017,8 @@ function createClassCard(cls) {
     card.style.height = `${cardHeight}px`;
     card.style.boxSizing = 'border-box';
 
+
+    // Mejor separación visual: el nombre del monitor va debajo de la hora, con margen
     let monitorDisplay = '';
     if (isCoordinator() && cls.monitorName) {
         monitorDisplay = `<div class="class-card-monitor">👤 ${cls.monitorName}</div>`;
@@ -1029,8 +1031,8 @@ function createClassCard(cls) {
 
     card.innerHTML = `
         <div class="class-card-time">${cls.startTime} - ${cls.endTime}</div>
-        <div class="class-card-occupancy">${studentsCount}/${maxCapacity}</div>
         ${monitorDisplay}
+        <div class="class-card-occupancy">${studentsCount}/${maxCapacity}</div>
         ${commentsIndicator}
     `;
 
@@ -1756,6 +1758,20 @@ function renderWeekTitle() {
     const endStr = formatDate(weekEnd);
 
     title.textContent = `Semana del ${startStr} - ${endStr}`;
+    // Asegura que los selectores de mes y año siempre tengan listeners
+    setupMonthYearSelectors();
+}
+
+// Setup listeners para los selectores de mes y año (llamar tras renderizar cabecera)
+function setupMonthYearSelectors() {
+    // Solo actualiza los títulos de mes y año. Los listeners se configuran
+    // una única vez en initializeEventListeners() para evitar duplicados.
+    const monthTitle = document.getElementById('monthTitle');
+    const yearTitle = document.getElementById('yearTitle');
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+    if (monthTitle) monthTitle.textContent = monthNames[date.getMonth()];
+    if (yearTitle) yearTitle.textContent = date.getFullYear();
 }
 
 function renderMonitorsList() {
@@ -2553,43 +2569,108 @@ function initializeEventListeners() {
     if (copyWeekBtnEl) copyWeekBtnEl.addEventListener('click', copyCurrentWeekToNext);
 
     // Month selector dropdown
+    // NUEVO: Selectores separados de mes y año
     const monthSelectorEl = getEl('monthSelector');
     const monthSelectorButton = getEl('monthSelectorButton');
     const monthSelectorDropdown = getEl('monthSelectorDropdown');
+    const yearSelectorEl = getEl('yearSelector');
+    const yearSelectorButton = getEl('yearSelectorButton');
+    const yearSelectorDropdown = getEl('yearSelectorDropdown');
+    const monthTitle = getEl('monthTitle');
+    const yearTitle = getEl('yearTitle');
 
-    if (monthSelectorButton && monthSelectorEl && monthSelectorDropdown) {
+    // Utilidades para meses y años
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    function updateMonthYearTitles() {
+        const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+        if (monthTitle) monthTitle.textContent = monthNames[date.getMonth()];
+        if (yearTitle) yearTitle.textContent = date.getFullYear();
+    }
+
+    function setMonthYear(month, year) {
+        const newDate = new Date(year, month, 1);
+        appState.currentMonthDate = newDate;
+        appState.currentWeekStart = getMonday(newDate);
+        appState.selectedDayDate = newDate.toISOString();
+        updateMonthYearTitles();
+        renderWeekTitle();
+        renderCalendar();
+    }
+
+    if (monthSelectorButton && monthSelectorEl && monthSelectorDropdown && yearSelectorButton && yearSelectorDropdown) {
+        // Rango de años: desde 2024 hasta el año actual + 1
+        const currentYear = new Date().getFullYear();
+        const startYear = 2024;
+        const endYear = currentYear + 1;
+
+        // Renderizar meses
+        function renderMonthDropdown() {
+            let html = '';
+            for (let m = 0; m < 12; m++) {
+                html += `<li data-month="${m}">${monthNames[m]}</li>`;
+            }
+            monthSelectorDropdown.innerHTML = html;
+        }
+
+        // Renderizar años
+        function renderYearDropdown() {
+            let html = '';
+            for (let y = endYear; y >= startYear; y--) {
+                html += `<li data-year="${y}">${y}</li>`;
+            }
+            yearSelectorDropdown.innerHTML = html;
+        }
+
+        // Mostrar/ocultar dropdowns
         monthSelectorButton.addEventListener('click', (e) => {
             e.stopPropagation();
+            renderMonthDropdown();
             monthSelectorEl.classList.toggle('open');
+            yearSelectorEl && yearSelectorEl.classList.remove('open');
+        });
+        yearSelectorButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            renderYearDropdown();
+            yearSelectorEl.classList.toggle('open');
+            monthSelectorEl && monthSelectorEl.classList.remove('open');
         });
 
-        monthSelectorDropdown.querySelectorAll('li').forEach(li => {
-            li.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const monthIndex = parseInt(li.getAttribute('data-month'), 10);
-                if (isNaN(monthIndex)) return;
-
-                const baseDate = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
-                const year = baseDate.getFullYear();
-                const newDate = new Date(year, monthIndex, 1);
-
-                appState.currentMonthDate = newDate;
-                appState.currentWeekStart = getMonday(newDate);
-                appState.selectedDayDate = newDate.toISOString();
-
-                monthSelectorEl.classList.remove('open');
-
-                renderWeekTitle();
-                renderCalendar();
-            });
+        // Selección de mes
+        monthSelectorDropdown.addEventListener('click', (e) => {
+            const li = e.target.closest('li[data-month]');
+            if (!li) return;
+            e.stopPropagation();
+            const monthIndex = parseInt(li.getAttribute('data-month'), 10);
+            if (isNaN(monthIndex)) return;
+            const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+            setMonthYear(monthIndex, date.getFullYear());
+            monthSelectorEl.classList.remove('open');
         });
 
-        // Close dropdown when clicking outside
+        // Selección de año
+        yearSelectorDropdown.addEventListener('click', (e) => {
+            const li = e.target.closest('li[data-year]');
+            if (!li) return;
+            e.stopPropagation();
+            const year = parseInt(li.getAttribute('data-year'), 10);
+            if (isNaN(year)) return;
+            const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+            setMonthYear(date.getMonth(), year);
+            yearSelectorEl.classList.remove('open');
+        });
+
+        // Cerrar ambos dropdowns al hacer click fuera
         document.addEventListener('click', (e) => {
             if (!monthSelectorEl.contains(e.target)) {
                 monthSelectorEl.classList.remove('open');
             }
+            if (!yearSelectorEl.contains(e.target)) {
+                yearSelectorEl.classList.remove('open');
+            }
         });
+
+        // Inicializar títulos
+        updateMonthYearTitles();
     }
 
     // Snap toggle button (15m / 30m)
@@ -2767,12 +2848,13 @@ async function initializeApp() {
         appState.currentMonthDate = new Date(today);
         appState.selectedDayDate = today.toISOString();
 
-        // Initialize event listeners
-        initializeEventListeners();
 
         // Render initial week title and calendar
         renderWeekTitle();
         renderCalendar();
+
+        // Ahora que el DOM está listo, inicializa los event listeners
+        initializeEventListeners();
 
         // Check if user is logged in (from localStorage)
         const savedUser = localStorage.getItem('padelApp_currentUser');
