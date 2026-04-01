@@ -2568,18 +2568,13 @@ function initializeEventListeners() {
     const copyWeekBtnEl = getEl('copyWeekBtn');
     if (copyWeekBtnEl) copyWeekBtnEl.addEventListener('click', copyCurrentWeekToNext);
 
-    // Month selector dropdown
-    // NUEVO: Selectores separados de mes y año
+    // Month/year selectors
     const monthSelectorEl = getEl('monthSelector');
     const monthSelectorButton = getEl('monthSelectorButton');
     const monthSelectorDropdown = getEl('monthSelectorDropdown');
-    const yearSelectorEl = getEl('yearSelector');
-    const yearSelectorButton = getEl('yearSelectorButton');
-    const yearSelectorDropdown = getEl('yearSelectorDropdown');
     const monthTitle = getEl('monthTitle');
     const yearTitle = getEl('yearTitle');
 
-    // Utilidades para meses y años
     const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
     function updateMonthYearTitles() {
         const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
@@ -2597,13 +2592,8 @@ function initializeEventListeners() {
         renderCalendar();
     }
 
-    if (monthSelectorButton && monthSelectorEl && monthSelectorDropdown && yearSelectorButton && yearSelectorDropdown) {
-        // Rango de años: desde 2024 hasta el año actual + 1
-        const currentYear = new Date().getFullYear();
-        const startYear = 2024;
-        const endYear = currentYear + 1;
-
-        // Renderizar meses
+    // Dropdown de meses
+    if (monthSelectorButton && monthSelectorEl && monthSelectorDropdown) {
         function renderMonthDropdown() {
             let html = '';
             for (let m = 0; m < 12; m++) {
@@ -2612,30 +2602,12 @@ function initializeEventListeners() {
             monthSelectorDropdown.innerHTML = html;
         }
 
-        // Renderizar años
-        function renderYearDropdown() {
-            let html = '';
-            for (let y = endYear; y >= startYear; y--) {
-                html += `<li data-year="${y}">${y}</li>`;
-            }
-            yearSelectorDropdown.innerHTML = html;
-        }
-
-        // Mostrar/ocultar dropdowns
         monthSelectorButton.addEventListener('click', (e) => {
             e.stopPropagation();
             renderMonthDropdown();
             monthSelectorEl.classList.toggle('open');
-            yearSelectorEl && yearSelectorEl.classList.remove('open');
-        });
-        yearSelectorButton.addEventListener('click', (e) => {
-            e.stopPropagation();
-            renderYearDropdown();
-            yearSelectorEl.classList.toggle('open');
-            monthSelectorEl && monthSelectorEl.classList.remove('open');
         });
 
-        // Selección de mes
         monthSelectorDropdown.addEventListener('click', (e) => {
             const li = e.target.closest('li[data-month]');
             if (!li) return;
@@ -2647,31 +2619,28 @@ function initializeEventListeners() {
             monthSelectorEl.classList.remove('open');
         });
 
-        // Selección de año
-        yearSelectorDropdown.addEventListener('click', (e) => {
-            const li = e.target.closest('li[data-year]');
-            if (!li) return;
-            e.stopPropagation();
-            const year = parseInt(li.getAttribute('data-year'), 10);
-            if (isNaN(year)) return;
-            const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
-            setMonthYear(date.getMonth(), year);
-            yearSelectorEl.classList.remove('open');
-        });
-
-        // Cerrar ambos dropdowns al hacer click fuera
         document.addEventListener('click', (e) => {
-            if (!monthSelectorEl.contains(e.target)) {
+            if (monthSelectorEl && !monthSelectorEl.contains(e.target)) {
                 monthSelectorEl.classList.remove('open');
             }
-            if (!yearSelectorEl.contains(e.target)) {
-                yearSelectorEl.classList.remove('open');
-            }
         });
-
-        // Inicializar títulos
-        updateMonthYearTitles();
     }
+
+    // Navegación de año con botones ‹ / ›
+    const yearPrevBtn = getEl('yearPrevBtn');
+    const yearNextBtn = getEl('yearNextBtn');
+    if (yearPrevBtn && yearNextBtn) {
+        yearPrevBtn.addEventListener('click', () => {
+            const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+            setMonthYear(date.getMonth(), date.getFullYear() - 1);
+        });
+        yearNextBtn.addEventListener('click', () => {
+            const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+            setMonthYear(date.getMonth(), date.getFullYear() + 1);
+        });
+    }
+
+    updateMonthYearTitles();
 
     // Snap toggle button (15m / 30m)
     const weekNavEl = document.querySelector('.week-navigation');
@@ -2789,9 +2758,17 @@ async function initializeApp() {
     try {
         const loginView = document.getElementById('login-view');
 
-        // Si Supabase está disponible, comprobamos primero si hay sesión de Auth.
-        // Si NO hay sesión, mostramos solo el overlay de login y salimos
-        // sin inicializar todavía la app (carga de datos, listeners, etc.).
+        // Inicializar fechas, títulos y listeners siempre, antes del check de sesión,
+        // para que estén listos cuando el usuario haga login.
+        const today = new Date();
+        appState.currentWeekStart = getMonday(today);
+        appState.currentMonthDate = new Date(today);
+        appState.selectedDayDate = today.toISOString();
+        renderWeekTitle();
+        renderCalendar();
+        initializeEventListeners();
+
+        // Comprobar sesión de Supabase
         if (typeof supabase !== 'undefined' && supabase) {
             try {
                 const { data, error } = await supabase.auth.getSession();
@@ -2803,9 +2780,6 @@ async function initializeApp() {
 
                 if (!hasSession) {
                     if (loginView) loginView.style.display = 'flex';
-
-                    // Nos aseguramos de que la pantalla de rol y la app principal
-                    // no se muestren mientras no haya sesión de Supabase.
                     hideLoginScreen();
                     hideMainApp();
                     hideLoading();
@@ -2815,7 +2789,6 @@ async function initializeApp() {
                 }
             } catch (sessionError) {
                 console.warn('Error comprobando sesión de Supabase al iniciar:', sessionError);
-                // En caso de error inesperado, mostramos el overlay para forzar re-login.
                 if (loginView) loginView.style.display = 'flex';
                 hideLoginScreen();
                 hideMainApp();
@@ -2823,17 +2796,14 @@ async function initializeApp() {
                 return;
             }
         } else {
-            // Si Supabase no está configurado, ocultamos el overlay de Auth
-            // y dejamos que la app funcione con el flujo local existente.
             if (loginView) loginView.style.display = 'none';
         }
 
-        // Check if Supabase is configured. If not, fallback to localStorage.
+        // Cargar datos
         if (typeof supabase === 'undefined' || !supabase) {
             console.warn('Supabase no está configurado. Usando datos locales (localStorage) como fallback.');
             loadFromLocalStorage();
         } else {
-            // Try loading data from Supabase, but fallback to localStorage on error
             try {
                 await loadAllData();
             } catch (loadError) {
@@ -2841,20 +2811,6 @@ async function initializeApp() {
                 loadFromLocalStorage();
             }
         }
-
-        // Set current week, month and selected day based on hoy
-        const today = new Date();
-        appState.currentWeekStart = getMonday(today);
-        appState.currentMonthDate = new Date(today);
-        appState.selectedDayDate = today.toISOString();
-
-
-        // Render initial week title and calendar
-        renderWeekTitle();
-        renderCalendar();
-
-        // Ahora que el DOM está listo, inicializa los event listeners
-        initializeEventListeners();
 
         // Check if user is logged in (from localStorage)
         const savedUser = localStorage.getItem('padelApp_currentUser');
