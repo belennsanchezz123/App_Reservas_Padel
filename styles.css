@@ -787,6 +787,40 @@ body {
     margin-top: 4px;
 }
 
+.year-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.year-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--gray-800);
+    min-width: 3rem;
+    text-align: center;
+}
+
+.year-nav-btn {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--gray-700);
+    cursor: pointer;
+    line-height: 1.4;
+    box-shadow: var(--shadow-sm);
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.year-nav-btn:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+}
+
 .month-selector-button {
     display: inline-flex;
     align-items: center;
@@ -854,27 +888,6 @@ body {
 }
 .month-selector-dropdown li:hover,
 .year-selector-dropdown li:hover {
-    background: var(--gray-100);
-}
-    z-index: 200;
-    min-width: 160px;
-    max-height: 260px;
-    overflow-y: auto;
-    display: none;
-}
-
-.month-selector.open .month-selector-dropdown {
-    display: block;
-}
-
-.month-selector-dropdown li {
-    padding: 6px 12px;
-    font-size: var(--font-size-sm);
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.month-selector-dropdown li:hover {
     background: var(--gray-100);
 }
 
