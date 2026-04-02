@@ -1757,9 +1757,23 @@ function renderWeekTitle() {
     const startStr = formatDate(weekStart);
     const endStr = formatDate(weekEnd);
 
-    title.textContent = `Semana del ${startStr} - ${endStr}`;
-    // Asegura que los selectores de mes y año siempre tengan listeners
+    const monitorHeader = document.getElementById('monitorViewHeader');
+    const monitorViewTitle = document.getElementById('monitorViewTitle');
+    if (appState.viewingMonitorId) {
+        const monitor = getMonitorById(appState.viewingMonitorId);
+        const monitorName = monitor ? monitor.name : '';
+        title.textContent = `Clases de ${monitorName}`;
+        if (monitorHeader) monitorHeader.style.display = 'flex';
+        if (monitorViewTitle) monitorViewTitle.textContent = monitorName;
+    } else {
+        title.textContent = `Semana del ${startStr} - ${endStr}`;
+        if (monitorHeader) monitorHeader.style.display = 'none';
+    }
     setupMonthYearSelectors();
+
+    // Sincronizar el título de semana en el panel de coordinador
+    const coordTitle = document.getElementById('coordWeekTitle');
+    if (coordTitle) coordTitle.textContent = `${startStr} – ${endStr}`;
 }
 
 // Setup listeners para los selectores de mes y año (llamar tras renderizar cabecera)
@@ -2447,12 +2461,7 @@ function viewMonitorClasses(monitorId) {
 
     appState.viewingMonitorId = monitorId;
 
-    const weekTitle = document.getElementById('weekTitle');
-    weekTitle.innerHTML = `
-        <button class="btn btn-sm" onclick="backToCoordinatorDashboard()">← Volver al Dashboard</button>
-        Clases de ${monitor.name}
-    `;
-
+    renderWeekTitle();
     renderCalendar();
 }
 
@@ -2460,6 +2469,13 @@ function backToCoordinatorDashboard() {
     appState.viewingMonitorId = null;
     renderWeekTitle();
     showCoordinatorDashboard();
+}
+
+function goHome() {
+    appState.viewingMonitorId = null;
+    appState.currentUser = null;
+    hideMainApp();
+    showLoginScreen();
 }
 
 async function confirmDeleteMonitor(monitorId) {
@@ -2485,7 +2501,11 @@ async function editMonitor(monitorId) {
 // EVENT LISTENERS
 // ==========================================
 
+let _listenersInitialized = false;
 function initializeEventListeners() {
+    if (_listenersInitialized) return;
+    _listenersInitialized = true;
+
     function getEl(id) {
         const el = document.getElementById(id);
         if (!el) console.warn(`initializeEventListeners: element not found: ${id}`);
@@ -2629,15 +2649,17 @@ function initializeEventListeners() {
     // Navegación de año con botones ‹ / ›
     const yearPrevBtn = getEl('yearPrevBtn');
     const yearNextBtn = getEl('yearNextBtn');
-    if (yearPrevBtn && yearNextBtn) {
-        yearPrevBtn.addEventListener('click', () => {
+    if (yearPrevBtn) {
+        yearPrevBtn.onclick = () => {
             const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
             setMonthYear(date.getMonth(), date.getFullYear() - 1);
-        });
-        yearNextBtn.addEventListener('click', () => {
+        };
+    }
+    if (yearNextBtn) {
+        yearNextBtn.onclick = () => {
             const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
             setMonthYear(date.getMonth(), date.getFullYear() + 1);
-        });
+        };
     }
 
     updateMonthYearTitles();

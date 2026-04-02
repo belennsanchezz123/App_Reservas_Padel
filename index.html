@@ -100,6 +100,7 @@
             <div class="logo-section">
                 <div class="logo-icon">🎾</div>
                 <h1 class="app-title">PadelPro Manager</h1>
+                <button class="btn-home" onclick="goHome()" title="Inicio">🏠</button>
             </div>
             <div class="header-actions">
                 <span id="userDisplay" class="user-display"></span>
@@ -122,7 +123,7 @@
                     Nuevo Monitor
                 </button>
             </div>
-            <div class="monitors-grid" id="monitorsList">
+<div class="monitors-grid" id="monitorsList">
                 <!-- Monitors will be injected here -->
             </div>
         </section>
@@ -147,6 +148,10 @@
 
         <!-- Calendar Section (Monitor View) -->
         <div id="calendarSectionContainer" style="flex: 1;">
+            <div id="monitorViewHeader" style="display:none;" class="monitor-view-header">
+                <button class="btn btn-secondary" onclick="backToCoordinatorDashboard()">← Volver al panel de coordinador</button>
+                <span id="monitorViewTitle" class="monitor-view-title"></span>
+            </div>
             <section class="calendar-section">
                 <!-- Week Navigation / Month Header -->
                 <div class="week-navigation">
@@ -192,6 +197,8 @@
                         <span class="btn-icon">👥</span>
                         Ver Alumnos
                     </button>
+                    <button class="btn btn-secondary" onclick="navigateWeek(-1)">← Semana Anterior</button>
+                    <button class="btn btn-secondary" onclick="navigateWeek(1)">Semana Siguiente →</button>
                     <!-- Students modal (opens full-screen modal) -->
                     <div class="modal" id="studentsModal">
                         <div class="modal-content" style="max-width:720px; width:90%;">
