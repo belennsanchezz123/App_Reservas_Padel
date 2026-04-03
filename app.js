@@ -2854,5 +2854,128 @@ async function initializeApp() {
     // Prevent clicks inside dropdown from closing it via document click
     // No special stopPropagation needed for modal; modal background click handler closes modal already.
 
+// ==========================================
+// EXCEL EXPORT (coordinator only, desktop)
+// ==========================================
+
+function exportToExcel() {
+    if (!window.XLSX) {
+        showToast('La librería Excel no está cargada. Recarga la página.', 'error');
+        return;
+    }
+    const monitors = appState.monitors;
+    if (monitors.length === 0) {
+        showToast('No hay monitores para exportar', 'warning');
+        return;
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    monitors.forEach(monitor => {
+        const sheetData = buildMonitorSheetData(monitor);
+        const ws = XLSX.utils.aoa_to_sheet(sheetData);
+        ws['!cols'] = [
+            { wch: 22 }, // label col
+            { wch: 22 }, // Lunes
+            { wch: 22 }, // Martes
+            { wch: 22 }, // Miércoles
+            { wch: 22 }, // Jueves
+            { wch: 22 }, // Viernes
+            { wch: 22 }, // Sábado
+            { wch: 22 }, // Domingo
+        ];
+        // Sanitize sheet name (max 31 chars, no special chars)
+        const safeName = monitor.name.substring(0, 31).replace(/[:\\\/\?\*\[\]]/g, '-');
+        XLSX.utils.book_append_sheet(wb, ws, safeName);
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `Clases_Padel_${today}.xlsx`);
+    showToast('Excel exportado correctamente', 'success');
+}
+
+function buildMonitorSheetData(monitor) {
+    const dayNames = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO'];
+    const classes = appState.classes.filter(c => c.monitorId === monitor.id);
+
+    const rows = [];
+    rows.push([`Monitor: ${monitor.name}`]);
+    rows.push([]);
+
+    if (classes.length === 0) {
+        rows.push(['Sin clases registradas']);
+        return rows;
+    }
+
+    // Group classes by week (Monday as start)
+    const weekMap = {};
+    classes.forEach(cls => {
+        if (!cls.date) return;
+        const date = new Date(cls.date);
+        const dayOfWeek = (date.getDay() + 6) % 7; // 0=Mon, 6=Sun
+        const monday = new Date(date);
+        monday.setDate(date.getDate() - dayOfWeek);
+        monday.setHours(0, 0, 0, 0);
+        const weekKey = monday.toISOString().slice(0, 10);
+        if (!weekMap[weekKey]) weekMap[weekKey] = { monday, classes: [] };
+        weekMap[weekKey].classes.push(cls);
+    });
+
+    const fmt = d => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+    Object.keys(weekMap).sort().forEach(weekKey => {
+        const { monday, classes: weekClasses } = weekMap[weekKey];
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+
+        rows.push([`SEMANA: ${fmt(monday)} - ${fmt(sunday)}`]);
+        rows.push(['', ...dayNames]);
+
+        // Bin classes by day index (0=Mon..6=Sun)
+        const byDay = Array.from({ length: 7 }, () => []);
+        weekClasses.forEach(cls => {
+            const d = new Date(cls.date);
+            const idx = (d.getDay() + 6) % 7;
+            byDay[idx].push(cls);
+        });
+        byDay.forEach(dayCls => dayCls.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || '')));
+
+        const maxClasses = Math.max(...byDay.map(d => d.length), 0);
+
+        for (let ci = 0; ci < maxClasses; ci++) {
+            // Time row
+            const timeRow = [''];
+            byDay.forEach(dayCls => {
+                const cls = dayCls[ci];
+                timeRow.push(cls ? `${cls.startTime} - ${cls.endTime}` : '');
+            });
+            rows.push(timeRow);
+
+            // Student rows
+            const maxStudents = Math.max(...byDay.map(d => {
+                const cls = d[ci];
+                return cls ? cls.students.length : 0;
+            }), 1);
+
+            for (let si = 0; si < maxStudents; si++) {
+                const studentRow = [''];
+                byDay.forEach(dayCls => {
+                    const cls = dayCls[ci];
+                    if (!cls) { studentRow.push(''); return; }
+                    const sid = cls.students[si];
+                    if (!sid) { studentRow.push(''); return; }
+                    const student = appState.students.find(s => s.id === sid);
+                    studentRow.push(student ? `${student.name} (${student.level || '-'})` : '');
+                });
+                rows.push(studentRow);
+            }
+        }
+
+        rows.push([]); // blank row between weeks
+    });
+
+    return rows;
+}
+
 // Start the app when DOM is ready
 document.addEventListener('DOMContentLoaded', initializeApp);
