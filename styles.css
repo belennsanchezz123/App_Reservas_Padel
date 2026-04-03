@@ -1582,6 +1582,12 @@ form {
     color: var(--gray-900);
 }
 
+.dashboard-header-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
 .monitors-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
