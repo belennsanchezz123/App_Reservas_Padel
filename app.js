@@ -383,39 +383,53 @@ function getMonitorById(monitorId) {
     return appState.monitors.find(m => m.id === monitorId);
 }
 
+function getClassDurationHours(cls) {
+    if (!cls.startTime || !cls.endTime) return 0;
+    const [sh, sm = '0'] = cls.startTime.split(':');
+    const [eh, em = '0'] = cls.endTime.split(':');
+    const startMinutes = parseInt(sh, 10) * 60 + parseInt(sm, 10);
+    const endMinutes = parseInt(eh, 10) * 60 + parseInt(em, 10);
+    return Math.max(endMinutes - startMinutes, 0) / 60;
+}
+
 function getMonitorStats(monitorId) {
     const classes = appState.classes.filter(c => c.monitorId === monitorId);
     const studentIds = new Set();
-    classes.forEach(cls => {
-        cls.students.forEach(sid => studentIds.add(sid));
-    });
+    classes.forEach(cls => cls.students.forEach(sid => studentIds.add(sid)));
 
-    // Calcular horas impartidas en el mes actual (solo clases marcadas como completadas)
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-
-    function getClassDurationHours(cls) {
-        if (!cls.startTime || !cls.endTime) return 0;
-        const [sh, sm = '0'] = cls.startTime.split(':');
-        const [eh, em = '0'] = cls.endTime.split(':');
-        const startMinutes = parseInt(sh, 10) * 60 + parseInt(sm, 10);
-        const endMinutes = parseInt(eh, 10) * 60 + parseInt(em, 10);
-        const durationMinutes = Math.max(endMinutes - startMinutes, 0);
-        return durationMinutes / 60;
-    }
 
     const monthlyHours = classes
         .filter(cls => {
-            const d = new Date(cls.date);
-            return d >= monthStart && d < nextMonthStart && cls.isCompleted;
+            const [y, mo] = (cls.date || '').split('-').map(Number);
+            return y === now.getFullYear() && (mo - 1) === now.getMonth();
         })
         .reduce((sum, cls) => sum + getClassDurationHours(cls), 0);
+
+    // Monthly breakdown: classes and hours for each month of the current year
+    const year = now.getFullYear();
+    const monthlyBreakdown = Array.from({ length: 12 }, (_, m) => {
+        const mClasses = classes.filter(cls => {
+            const [y, mo] = (cls.date || '').split('-').map(Number);
+            return y === year && (mo - 1) === m;
+        });
+        const mHours = mClasses
+            .reduce((sum, cls) => sum + getClassDurationHours(cls), 0);
+        return { month: m, count: mClasses.length, hours: mHours };
+    });
+
+    // Unique students with details
+    const students = [...studentIds]
+        .map(sid => appState.students.find(s => s.id === sid))
+        .filter(Boolean)
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     return {
         totalClasses: classes.length,
         totalStudents: studentIds.size,
         hoursThisMonth: Number.isFinite(monthlyHours) ? monthlyHours : 0,
+        monthlyBreakdown,
+        students,
     };
 }
 
@@ -1804,6 +1818,16 @@ function renderMonitorsList() {
         const card = document.createElement('div');
         card.className = 'monitor-card';
 
+        const studentList = stats.students.length > 0
+            ? stats.students.map(s => `
+                <div class="monitor-student-item">
+                    <span class="monitor-student-name">${s.name}</span>
+                    <span class="monitor-student-level">${s.level || '—'}</span>
+                </div>`).join('')
+            : '<p class="monitor-no-students">Sin alumnos registrados</p>';
+
+        const currentYear = new Date().getFullYear();
+
         card.innerHTML = `
             <div class="monitor-card-header">
                 <h3>👤 ${monitor.name}</h3>
@@ -1817,24 +1841,66 @@ function renderMonitorsList() {
                 <p>📧 ${monitor.email || 'Sin email'}</p>
                 <p>📞 ${monitor.phone || 'Sin teléfono'}</p>
             </div>
-            <div class="monitor-card-stats">
-                <div class="stat-item">
-                    <span class="stat-value">${stats.totalClasses}</span>
-                    <span class="stat-label">Clases</span>
+            <button class="monitor-details-toggle" onclick="toggleMonitorDetails(this)">
+                Ver detalles ▼
+            </button>
+            <div class="monitor-details-panel" style="display:none;">
+                <div class="monitor-details-section">
+                    <div class="monitor-month-year-nav">
+                        <button class="monitor-year-btn" onclick="changeMonitorYear(this, '${monitor.id}', -1)">&#8249;</button>
+                        <span class="monitor-year-label" data-year="${currentYear}">${currentYear}</span>
+                        <button class="monitor-year-btn" onclick="changeMonitorYear(this, '${monitor.id}', 1)">&#8250;</button>
+                    </div>
+                    <table class="monitor-month-table">
+                        <thead>
+                            <tr><th>Mes</th><th>Clases</th><th>Horas</th></tr>
+                        </thead>
+                        <tbody id="month-tbody-${monitor.id}">${buildMonthRows(monitor.id, currentYear)}</tbody>
+                    </table>
                 </div>
-                <div class="stat-item">
-                    <span class="stat-value">${stats.totalStudents}</span>
-                    <span class="stat-label">Alumnos</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-value">${stats.hoursThisMonth.toFixed(1)}</span>
-                    <span class="stat-label">Horas mes</span>
+                <div class="monitor-details-section">
+                    <h4>Alumnos asociados (${stats.students.length})</h4>
+                    <div class="monitor-students-list">${studentList}</div>
                 </div>
             </div>
         `;
 
         container.appendChild(card);
     });
+}
+
+function toggleMonitorDetails(btn) {
+    const panel = btn.nextElementSibling;
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    btn.textContent = open ? 'Ocultar detalles ▲' : 'Ver detalles ▼';
+}
+
+function buildMonthRows(monitorId, year) {
+    const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    const classes = appState.classes.filter(c => c.monitorId === monitorId);
+    return monthNames.map((name, m) => {
+        const mClasses = classes.filter(cls => {
+            const [y, mo] = (cls.date || '').split('-').map(Number);
+            return y === year && (mo - 1) === m;
+        });
+        const mHours = mClasses
+            .reduce((sum, cls) => sum + getClassDurationHours(cls), 0);
+        const empty = mClasses.length === 0;
+        return `<tr class="${empty ? 'month-row-empty' : ''}">
+            <td>${name}</td><td>${mClasses.length}</td><td>${mHours.toFixed(1)}</td>
+        </tr>`;
+    }).join('');
+}
+
+function changeMonitorYear(btn, monitorId, delta) {
+    const nav = btn.parentElement;
+    const label = nav.querySelector('.monitor-year-label');
+    const newYear = parseInt(label.dataset.year, 10) + delta;
+    label.dataset.year = newYear;
+    label.textContent = newYear;
+    const tbody = document.getElementById(`month-tbody-${monitorId}`);
+    if (tbody) tbody.innerHTML = buildMonthRows(monitorId, newYear);
 }
 
 // ==========================================
