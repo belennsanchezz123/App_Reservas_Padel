@@ -297,6 +297,7 @@ const db = {
             if (updates.monitorId !== undefined) dbUpdates.monitor_id = updates.monitorId;
             if (updates.monitorName !== undefined) dbUpdates.monitor_name = updates.monitorName;
             if (updates.comments !== undefined) dbUpdates.comments = updates.comments;
+            if (updates.paid !== undefined) dbUpdates.paid = updates.paid;
 
             const { data, error } = await supabase
                 .from('classes')
@@ -348,7 +349,8 @@ const db = {
             isCompleted: dbClass.is_completed,
             monitorId: dbClass.monitor_id,
             monitorName: dbClass.monitor_name,
-            comments: dbClass.comments || ''
+            comments: dbClass.comments || '',
+            paid: dbClass.paid || false
         };
     },
 

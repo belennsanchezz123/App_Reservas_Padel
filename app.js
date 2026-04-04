@@ -16,7 +16,7 @@ const appState = {
 };
 
 const CONFIG = {
-    hoursStart: 8,
+    hoursStart: 7,
     hoursEnd: 23,
     maxStudentsPerClass: 4,
     days: ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'],
@@ -585,7 +585,7 @@ async function addClass(day, startTime, endTime, studentIds) {
     }
 }
 
-async function updateClass(classId, updates) {
+async function updateClass(classId, updates, silent = false) {
     try {
         try {
             await db.updateClass(classId, updates);
@@ -595,7 +595,7 @@ async function updateClass(classId, updates) {
             }
             renderCalendar();
             saveToLocalStorage();
-            showToast('Clase actualizada', 'success');
+            if (!silent) showToast('Clase actualizada', 'success');
         } catch (dbError) {
             console.warn('db.updateClass falló, aplicando cambio localmente:', dbError);
             const classIndex = appState.classes.findIndex(c => c.id === classId);
@@ -604,7 +604,7 @@ async function updateClass(classId, updates) {
             }
             renderCalendar();
             saveToLocalStorage();
-            showToast('Clase actualizada localmente (sin conexión)', 'warning');
+            if (!silent) showToast('Clase actualizada localmente (sin conexión)', 'warning');
         }
     } catch (error) {
         console.error('Error updating class:', error);
@@ -1884,13 +1884,87 @@ function buildMonthRows(monitorId, year) {
             const [y, mo] = (cls.date || '').split('-').map(Number);
             return y === year && (mo - 1) === m;
         });
-        const mHours = mClasses
-            .reduce((sum, cls) => sum + getClassDurationHours(cls), 0);
+        const mHours = mClasses.reduce((sum, cls) => sum + getClassDurationHours(cls), 0);
         const empty = mClasses.length === 0;
-        return `<tr class="${empty ? 'month-row-empty' : ''}">
-            <td>${name}</td><td>${mClasses.length}</td><td>${mHours.toFixed(1)}</td>
-        </tr>`;
+
+        const sorted = mClasses.sort((a, b) =>
+            (a.date || '').localeCompare(b.date || '') || (a.startTime || '').localeCompare(b.startTime || ''));
+
+        const detailRows = sorted.map(cls => {
+            const h = getClassDurationHours(cls);
+            const [, , dd] = (cls.date || '').split('-');
+            const studentCount = cls.students ? cls.students.length : 0;
+            return `<tr class="month-class-detail-row">
+                <td style="padding-left:1.5rem;font-size:0.78rem;color:var(--gray-600);">
+                    ${name} ${parseInt(dd,10)} · ${cls.startTime}–${cls.endTime} · ${studentCount} alumnos
+                </td>
+                <td style="font-size:0.78rem;color:var(--gray-600);text-align:center;">${h.toFixed(1)}</td>
+                <td style="text-align:center;">
+                    <input type="checkbox" class="paid-checkbox" data-class-id="${cls.id}"
+                        ${cls.paid ? 'checked' : ''}
+                        onchange="toggleClassPaid('${cls.id}', this.checked)"
+                        style="width:16px;height:16px;cursor:pointer;accent-color:var(--primary-green);">
+                </td>
+            </tr>`;
+        }).join('');
+
+        const detailHtml = empty ? '' : `
+            <tr class="month-detail-container" style="display:none;">
+                <td colspan="3" style="padding:0;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <tr>
+                            <td colspan="3" style="padding:0.3rem 1.5rem;">
+                                <button onclick="payAllMonthClasses(this, '${monitorId}', ${year}, ${m})"
+                                    style="font-size:0.75rem;padding:3px 10px;background:var(--primary-green);color:white;border:none;border-radius:4px;cursor:pointer;">
+                                    Pagar todas las clases
+                                </button>
+                            </td>
+                        </tr>
+                        ${detailRows}
+                    </table>
+                </td>
+            </tr>`;
+
+        const clickAttr = empty ? '' : `style="cursor:pointer;" onclick="toggleMonthDetail(this)"`;
+        return `<tr class="${empty ? 'month-row-empty' : 'month-row-clickable'}" ${clickAttr}>
+            <td>${name}${empty ? '' : ' <span class="month-expand-icon">▸</span>'}</td>
+            <td>${mClasses.length}</td>
+            <td>${mHours.toFixed(1)}</td>
+        </tr>${detailHtml}`;
     }).join('');
+}
+
+function toggleMonthDetail(row) {
+    const detailRow = row.nextElementSibling;
+    if (!detailRow || !detailRow.classList.contains('month-detail-container')) return;
+    const open = detailRow.style.display === 'none';
+    detailRow.style.display = open ? '' : 'none';
+    const icon = row.querySelector('.month-expand-icon');
+    if (icon) icon.textContent = open ? '▾' : '▸';
+}
+
+async function toggleClassPaid(classId, newPaid) {
+    const cls = appState.classes.find(c => c.id === classId);
+    if (!cls) return;
+    cls.paid = newPaid;
+    await updateClass(classId, { paid: newPaid }, true);
+}
+
+async function payAllMonthClasses(btn, monitorId, year, month) {
+    const classes = appState.classes.filter(c => {
+        if (c.monitorId !== monitorId) return false;
+        const [y, mo] = (c.date || '').split('-').map(Number);
+        return y === year && (mo - 1) === month;
+    });
+    await Promise.all(classes.map(cls => {
+        cls.paid = true;
+        return updateClass(cls.id, { paid: true }, true);
+    }));
+    // Update all checkboxes in this detail block without closing the panel
+    const detailRow = btn.closest('tr.month-detail-container');
+    if (detailRow) {
+        detailRow.querySelectorAll('.paid-checkbox').forEach(cb => { cb.checked = true; });
+    }
 }
 
 function changeMonitorYear(btn, monitorId, delta) {

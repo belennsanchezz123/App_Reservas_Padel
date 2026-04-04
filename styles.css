@@ -1843,6 +1843,20 @@ form {
     color: var(--gray-400);
 }
 
+.monitor-month-table .month-row-clickable:hover td {
+    background: var(--gray-100);
+}
+
+.month-expand-icon {
+    font-size: 0.7rem;
+    color: var(--gray-400);
+}
+
+.monitor-month-table .month-class-detail-row td {
+    background: var(--gray-50);
+    border-bottom: 1px solid var(--gray-100);
+}
+
 .monitor-month-table tr:last-child td {
     border-bottom: none;
 }
