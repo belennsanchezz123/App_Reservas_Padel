@@ -2998,8 +2998,24 @@ async function initializeApp() {
 // EXCEL EXPORT (coordinator only, desktop)
 // ==========================================
 
-function exportToExcel() {
-    if (!window.XLSX) {
+const EXCEL_COLORS = {
+    greenDark:   '1B5E20', // semana header bg
+    greenMed:    '2E7D32', // días semana bg
+    greenLight:  'C8E6C9', // monitor header bg
+    timeBg:      'FFF8E1', // fila de horas bg
+    timeFont:    'E65100', // texto horas
+    white:       'FFFFFF',
+    gray:        'F5F5F5',
+};
+
+function styleCell(cell, { bgColor, fontColor, bold = false, fontSize = 11, italic = false } = {}) {
+    if (bgColor) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + bgColor } };
+    cell.font = { bold, italic, size: fontSize, color: { argb: 'FF' + (fontColor || '000000') } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+}
+
+async function exportToExcel() {
+    if (typeof ExcelJS === 'undefined') {
         showToast('La librería Excel no está cargada. Recarga la página.', 'error');
         return;
     }
@@ -3009,112 +3025,139 @@ function exportToExcel() {
         return;
     }
 
-    const wb = XLSX.utils.book_new();
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Padel Pro Manager';
 
-    monitors.forEach(monitor => {
-        const sheetData = buildMonitorSheetData(monitor);
-        const ws = XLSX.utils.aoa_to_sheet(sheetData);
-        ws['!cols'] = [
-            { wch: 22 }, // label col
-            { wch: 22 }, // Lunes
-            { wch: 22 }, // Martes
-            { wch: 22 }, // Miércoles
-            { wch: 22 }, // Jueves
-            { wch: 22 }, // Viernes
-            { wch: 22 }, // Sábado
-            { wch: 22 }, // Domingo
-        ];
-        // Sanitize sheet name (max 31 chars, no special chars)
-        const safeName = monitor.name.substring(0, 31).replace(/[:\\\/\?\*\[\]]/g, '-');
-        XLSX.utils.book_append_sheet(wb, ws, safeName);
-    });
+    for (const monitor of monitors) {
+        const safeName = monitor.name.substring(0, 31).replace(/[:\\/?*[\]]/g, '-');
+        const sheet = workbook.addWorksheet(safeName);
+        sheet.columns = Array(8).fill({ width: 22 });
+        buildMonitorSheet(sheet, monitor);
+    }
 
-    const today = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `Clases_Padel_${today}.xlsx`);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Clases_Padel_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
     showToast('Excel exportado correctamente', 'success');
 }
 
-function buildMonitorSheetData(monitor) {
+function buildMonitorSheet(sheet, monitor) {
     const dayNames = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO'];
     const classes = appState.classes.filter(c => c.monitorId === monitor.id);
 
-    const rows = [];
-    rows.push([`Monitor: ${monitor.name}`]);
-    rows.push([]);
+    // Monitor name header
+    const headerRow = sheet.addRow([`Monitor: ${monitor.name}`]);
+    sheet.mergeCells(headerRow.number, 1, headerRow.number, 8);
+    styleCell(headerRow.getCell(1), { bgColor: EXCEL_COLORS.greenLight, fontColor: EXCEL_COLORS.greenDark, bold: true, fontSize: 13 });
+    headerRow.height = 22;
+    sheet.addRow([]);
 
     if (classes.length === 0) {
-        rows.push(['Sin clases registradas']);
-        return rows;
+        sheet.addRow(['Sin clases registradas']);
+        return;
     }
 
-    // Group classes by week (Monday as start)
+    // Group by week
     const weekMap = {};
+    const fmt = d => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+
+    // Helper: parse date string safely, ignoring time part
+    function parseDate(dateStr) {
+        if (!dateStr) return null;
+        const clean = String(dateStr).slice(0, 10); // "YYYY-MM-DD"
+        const [y, mo, dd] = clean.split('-').map(Number);
+        if (!y || !mo || !dd || isNaN(y) || isNaN(mo) || isNaN(dd)) return null;
+        return { y, mo, dd, date: new Date(y, mo - 1, dd) };
+    }
+
     classes.forEach(cls => {
-        if (!cls.date) return;
-        const date = new Date(cls.date);
-        const dayOfWeek = (date.getDay() + 6) % 7; // 0=Mon, 6=Sun
-        const monday = new Date(date);
-        monday.setDate(date.getDate() - dayOfWeek);
-        monday.setHours(0, 0, 0, 0);
-        const weekKey = monday.toISOString().slice(0, 10);
+        const parsed = parseDate(cls.date);
+        if (!parsed) return;
+        const { y, mo, dd, date } = parsed;
+        const dayOfWeek = (date.getDay() + 6) % 7;
+        const monday = new Date(y, mo - 1, dd - dayOfWeek);
+        const weekKey = `${monday.getFullYear()}-${String(monday.getMonth()+1).padStart(2,'0')}-${String(monday.getDate()).padStart(2,'0')}`;
         if (!weekMap[weekKey]) weekMap[weekKey] = { monday, classes: [] };
         weekMap[weekKey].classes.push(cls);
     });
-
-    const fmt = d => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
 
     Object.keys(weekMap).sort().forEach(weekKey => {
         const { monday, classes: weekClasses } = weekMap[weekKey];
         const sunday = new Date(monday);
         sunday.setDate(monday.getDate() + 6);
 
-        rows.push([`SEMANA: ${fmt(monday)} - ${fmt(sunday)}`]);
-        rows.push(['', ...dayNames]);
+        // Week header row
+        const weekRow = sheet.addRow([`SEMANA: ${fmt(monday)} - ${fmt(sunday)}`]);
+        sheet.mergeCells(weekRow.number, 1, weekRow.number, 8);
+        styleCell(weekRow.getCell(1), { bgColor: EXCEL_COLORS.greenDark, fontColor: EXCEL_COLORS.white, bold: true, fontSize: 11 });
+        weekRow.height = 18;
 
-        // Bin classes by day index (0=Mon..6=Sun)
+        // Day names header row
+        const dayRow = sheet.addRow(['', ...dayNames]);
+        dayRow.getCell(1).value = '';
+        styleCell(dayRow.getCell(1), { bgColor: EXCEL_COLORS.greenMed });
+        dayNames.forEach((_, i) => {
+            styleCell(dayRow.getCell(i + 2), { bgColor: EXCEL_COLORS.greenMed, fontColor: EXCEL_COLORS.white, bold: true });
+        });
+        dayRow.height = 18;
+
+        // Bin classes by day
         const byDay = Array.from({ length: 7 }, () => []);
         weekClasses.forEach(cls => {
-            const d = new Date(cls.date);
-            const idx = (d.getDay() + 6) % 7;
-            byDay[idx].push(cls);
+            const parsed = parseDate(cls.date);
+            if (!parsed) return;
+            const idx = (parsed.date.getDay() + 6) % 7;
+            if (idx >= 0 && idx < 7) byDay[idx].push(cls);
         });
-        byDay.forEach(dayCls => dayCls.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || '')));
+        byDay.forEach(d => d.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || '')));
 
         const maxClasses = Math.max(...byDay.map(d => d.length), 0);
 
         for (let ci = 0; ci < maxClasses; ci++) {
             // Time row
-            const timeRow = [''];
+            const timeValues = [''];
             byDay.forEach(dayCls => {
                 const cls = dayCls[ci];
-                timeRow.push(cls ? `${cls.startTime} - ${cls.endTime}` : '');
+                timeValues.push(cls ? `${cls.startTime} - ${cls.endTime}` : '');
             });
-            rows.push(timeRow);
+            const timeRow = sheet.addRow(timeValues);
+            styleCell(timeRow.getCell(1), { bgColor: EXCEL_COLORS.gray });
+            for (let col = 2; col <= 8; col++) {
+                styleCell(timeRow.getCell(col), {
+                    bgColor: timeValues[col - 1] ? EXCEL_COLORS.timeBg : EXCEL_COLORS.gray,
+                    fontColor: timeValues[col - 1] ? EXCEL_COLORS.timeFont : '000000',
+                    bold: !!timeValues[col - 1],
+                });
+            }
+            timeRow.height = 16;
 
             // Student rows
-            const maxStudents = Math.max(...byDay.map(d => {
-                const cls = d[ci];
-                return cls ? cls.students.length : 0;
-            }), 1);
-
+            const maxStudents = Math.max(...byDay.map(d => (d[ci] ? d[ci].students.length : 0)), 1);
             for (let si = 0; si < maxStudents; si++) {
-                const studentRow = [''];
+                const studentValues = [''];
                 byDay.forEach(dayCls => {
                     const cls = dayCls[ci];
-                    if (!cls) { studentRow.push(''); return; }
+                    if (!cls) { studentValues.push(''); return; }
                     const sid = cls.students[si];
-                    if (!sid) { studentRow.push(''); return; }
+                    if (!sid) { studentValues.push(''); return; }
                     const student = appState.students.find(s => s.id === sid);
-                    studentRow.push(student ? `${student.name} (${student.level || '-'})` : '');
+                    studentValues.push(student ? `${student.name} (${student.level || '-'})` : '');
                 });
-                rows.push(studentRow);
+                const studentRow = sheet.addRow(studentValues);
+                for (let col = 1; col <= 8; col++) {
+                    studentRow.getCell(col).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+                }
+                studentRow.height = 15;
             }
         }
 
-        rows.push([]); // blank row between weeks
+        sheet.addRow([]); // blank row between weeks
     });
-
-    return rows;
 }
 
 // Start the app when DOM is ready
