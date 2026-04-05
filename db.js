@@ -43,14 +43,14 @@ const db = {
         try {
             const { data, error } = await supabase
                 .from('monitors')
-                .insert([{
+                .upsert([{
                     id: monitor.id,
                     name: monitor.name,
                     email: monitor.email,
                     phone: monitor.phone,
                     role: monitor.role || 'monitor',
                     created_date: monitor.createdDate || new Date().toISOString()
-                }])
+                }], { onConflict: 'id' })
                 .select()
                 .single();
 
@@ -133,14 +133,14 @@ const db = {
         try {
             const { data, error } = await supabase
                 .from('students')
-                .insert([{
+                .upsert([{
                     id: student.id,
                     name: student.name,
                     email: student.email,
                     phone: student.phone,
                     level: student.level,
                     registered_date: student.registeredDate || new Date().toISOString()
-                }])
+                }], { onConflict: 'id' })
                 .select()
                 .single();
 
@@ -254,14 +254,15 @@ const db = {
 
     async createClass(classData) {
         try {
+            const _dateStr = new Date(classData.date).toLocaleDateString('sv');
             const { data, error } = await supabase
                 .from('classes')
-                .insert([{
+                .upsert([{
                     id: classData.id,
                     day: classData.day,
                     date: classData.date,
-                    start_time: classData.startTime,
-                    end_time: classData.endTime,
+                    start_at: `${_dateStr}T${classData.startTime}:00`,
+                    end_at: `${_dateStr}T${classData.endTime}:00`,
                     students: classData.students,
                     max_capacity: classData.maxCapacity || 4,
                     status: classData.status || 'active',
@@ -269,7 +270,7 @@ const db = {
                     monitor_id: classData.monitorId,
                     monitor_name: classData.monitorName,
                     comments: classData.comments || null
-                }])
+                }], { onConflict: 'monitor_id,start_at' })
                 .select()
                 .single();
 
@@ -288,8 +289,10 @@ const db = {
             const dbUpdates = {};
             if (updates.day !== undefined) dbUpdates.day = updates.day;
             if (updates.date !== undefined) dbUpdates.date = updates.date;
-            if (updates.startTime !== undefined) dbUpdates.start_time = updates.startTime;
-            if (updates.endTime !== undefined) dbUpdates.end_time = updates.endTime;
+            if (updates.date !== undefined && updates.startTime !== undefined)
+                dbUpdates.start_at = `${new Date(updates.date).toLocaleDateString('sv')}T${updates.startTime}:00`;
+            if (updates.date !== undefined && updates.endTime !== undefined)
+                dbUpdates.end_at = `${new Date(updates.date).toLocaleDateString('sv')}T${updates.endTime}:00`;
             if (updates.students !== undefined) dbUpdates.students = updates.students;
             if (updates.maxCapacity !== undefined) dbUpdates.max_capacity = updates.maxCapacity;
             if (updates.status !== undefined) dbUpdates.status = updates.status;
@@ -301,8 +304,7 @@ const db = {
 
             const { data, error } = await supabase
                 .from('classes')
-                .update(dbUpdates)
-                .eq('id', id)
+                .upsert({ id, ...dbUpdates }, { onConflict: 'monitor_id,start_at' })
                 .select()
                 .single();
 
@@ -337,12 +339,20 @@ const db = {
     // Convertir datos de Supabase (snake_case) a formato app (camelCase)
     convertClassFromDB(dbClass) {
         if (!dbClass) return null;
+        const _startAt = new Date(dbClass.start_at);
+        const _DAYS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
         return {
             id: dbClass.id,
-            day: dbClass.day,
-            date: dbClass.date,
-            startTime: dbClass.start_time,
-            endTime: dbClass.end_time,
+            day: _DAYS_ES[(_startAt.getDay() + 6) % 7],
+            date: _startAt.toLocaleDateString('sv'),
+            startTime: new Date(dbClass.start_at).toLocaleTimeString('es-ES', {
+                hour: '2-digit',
+                minute: '2-digit'
+            }),
+            endTime: new Date(dbClass.end_at).toLocaleTimeString('es-ES', {
+                hour: '2-digit',
+                minute: '2-digit'
+            }),
             students: dbClass.students || [],
             maxCapacity: dbClass.max_capacity,
             status: dbClass.status,

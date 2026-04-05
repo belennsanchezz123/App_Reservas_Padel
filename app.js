@@ -1097,7 +1097,7 @@ function createClassCard(cls) {
             const newEndTime = addMinutesToTime(cls.startTime, finalDuration);
 
             // Update class locally first for instant feedback and mark pending save
-            markClassPendingSave(cls.id, { endTime: newEndTime });
+            markClassPendingSave(cls.id, { endTime: newEndTime, date: cls.date });
         }
 
             document.addEventListener('mousemove', onMouseMove);
