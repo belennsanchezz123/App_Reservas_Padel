@@ -6,6 +6,8 @@ const appState = {
     students: [],
     classes: [],
     currentWeekStart: null,
+    currentMonthDate: null,
+    selectedDayDate: null,
     selectedClass: null,
     editingStudent: null,
     monitors: [],
@@ -14,7 +16,7 @@ const appState = {
 };
 
 const CONFIG = {
-    hoursStart: 8,
+    hoursStart: 7,
     hoursEnd: 23,
     maxStudentsPerClass: 4,
     days: ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'],
@@ -37,6 +39,76 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // ==========================================
+// SIMPLE EMAIL/PASSWORD LOGIN OVERLAY (index.html #login-view)
+// ==========================================
+
+// Esta función se llama desde el botón "Entrar" del nuevo login
+// que has añadido en index.html. Aquí conectamos de verdad con Supabase Auth
+// usando supabase-js v2 (UMD) para hacer signInWithPassword.
+async function handleLogin() {
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const errorMsg = document.getElementById('error-msg');
+
+    if (!emailInput || !passwordInput || !errorMsg) return;
+
+    const email = emailInput.value.trim();
+    const password = passwordInput.value.trim();
+
+    if (!email || !password) {
+        errorMsg.textContent = 'Introduce correo y contraseña.';
+        errorMsg.style.display = 'block';
+        return;
+    }
+
+    if (typeof supabase === 'undefined' || !supabase) {
+        errorMsg.textContent = 'Supabase no está disponible en esta página.';
+        errorMsg.style.display = 'block';
+        return;
+    }
+
+    try {
+        errorMsg.style.display = 'none';
+
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+        });
+
+        if (error) {
+            console.error('Error de login Supabase:', error);
+            errorMsg.textContent = error.message || 'Error al iniciar sesión.';
+            errorMsg.style.display = 'block';
+            return;
+        }
+
+        const loginView = document.getElementById('login-view');
+        if (loginView) {
+            loginView.style.display = 'none';
+        }
+
+        console.log('✅ Login Supabase correcto', data);
+
+		// Una vez autenticado correctamente en Supabase, inicializamos la app
+		// para cargar datos y mostrar la pantalla de rol (coordinador/monitor)
+		// o la vista principal si ya había un usuario guardado.
+		try {
+			await initializeApp();
+		} catch (initError) {
+			console.error('Error al inicializar la app tras el login:', initError);
+		}
+    } catch (e) {
+        console.error('Excepción en handleLogin:', e);
+        errorMsg.textContent = 'Error inesperado al iniciar sesión.';
+        errorMsg.style.display = 'block';
+    }
+}
+
+// El control de visibilidad del overlay de login (#login-view)
+// se realiza dentro de initializeApp(), para que el flujo de
+// autenticación y carga de datos esté centralizado.
+
+// ==========================================
 // UTILITY FUNCTIONS
 // ==========================================
 
@@ -50,6 +122,20 @@ function formatDate(date) {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const year = d.getFullYear();
     return `${day}/${month}/${year}`;
+}
+
+function formatDateISO(date) {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function formatMonthYearSpanish(date) {
+    const d = new Date(date);
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    return `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 function getMonday(date) {
@@ -85,6 +171,42 @@ function minutesToTime(totalMinutes) {
     const hh = Math.floor(totalMinutes / 60) % 24;
     const mm = totalMinutes % 60;
     return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function isTouchDevice() {
+    return ('ontouchstart' in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+}
+
+function timeStringToMinutes(timeStr) {
+    if (!timeStr) return 0;
+    const [h, m] = String(timeStr).split(':').map(n => parseInt(n, 10) || 0);
+    return h * 60 + m;
+}
+
+function isSameCalendarDay(dateA, dateB) {
+    const d1 = new Date(dateA);
+    const d2 = new Date(dateB);
+    return d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate();
+}
+
+function hasClassTimeConflict(targetDate, startTime, endTime, excludeClassId = null) {
+    const targetStart = timeStringToMinutes(startTime);
+    const targetEnd = timeStringToMinutes(endTime);
+    if (!targetDate || isNaN(targetStart) || isNaN(targetEnd)) return false;
+
+    return appState.classes.some(cls => {
+        if (!cls || !cls.date) return false;
+        if (excludeClassId && cls.id === excludeClassId) return false;
+        if (!isSameCalendarDay(cls.date, targetDate)) return false;
+
+        const otherStart = timeStringToMinutes(cls.startTime);
+        const otherEnd = timeStringToMinutes(cls.endTime);
+
+        // Overlap if intervals intersect: [start, end) ∩ [otherStart, otherEnd) ≠ ∅
+        return targetStart < otherEnd && targetEnd > otherStart;
+    });
 }
 
 function showLoading(message = 'Cargando...') {
@@ -151,7 +273,23 @@ async function login(role, monitorId = null, monitorName = null) {
 function logout() {
     appState.currentUser = null;
     localStorage.removeItem('padelApp_currentUser');
-    showLoginScreen();
+    localStorage.removeItem('padelApp_dbLogin');
+
+    // Cerrar sesión también en Supabase Auth si está disponible
+    if (typeof supabase !== 'undefined' && supabase) {
+        supabase.auth.signOut().catch(err => {
+            console.warn('Error al cerrar sesión en Supabase:', err);
+        });
+    }
+
+    const loginView = document.getElementById('login-view');
+    if (loginView) {
+        loginView.style.display = 'flex';
+    }
+
+    // Al cerrar sesión, ocultamos la pantalla de rol y la app principal;
+    // el usuario deberá autenticarse de nuevo en Supabase para continuar.
+    hideLoginScreen();
     hideMainApp();
 }
 
@@ -245,16 +383,53 @@ function getMonitorById(monitorId) {
     return appState.monitors.find(m => m.id === monitorId);
 }
 
+function getClassDurationHours(cls) {
+    if (!cls.startTime || !cls.endTime) return 0;
+    const [sh, sm = '0'] = cls.startTime.split(':');
+    const [eh, em = '0'] = cls.endTime.split(':');
+    const startMinutes = parseInt(sh, 10) * 60 + parseInt(sm, 10);
+    const endMinutes = parseInt(eh, 10) * 60 + parseInt(em, 10);
+    return Math.max(endMinutes - startMinutes, 0) / 60;
+}
+
 function getMonitorStats(monitorId) {
     const classes = appState.classes.filter(c => c.monitorId === monitorId);
     const studentIds = new Set();
-    classes.forEach(cls => {
-        cls.students.forEach(sid => studentIds.add(sid));
+    classes.forEach(cls => cls.students.forEach(sid => studentIds.add(sid)));
+
+    const now = new Date();
+
+    const monthlyHours = classes
+        .filter(cls => {
+            const [y, mo] = (cls.date || '').split('-').map(Number);
+            return y === now.getFullYear() && (mo - 1) === now.getMonth();
+        })
+        .reduce((sum, cls) => sum + getClassDurationHours(cls), 0);
+
+    // Monthly breakdown: classes and hours for each month of the current year
+    const year = now.getFullYear();
+    const monthlyBreakdown = Array.from({ length: 12 }, (_, m) => {
+        const mClasses = classes.filter(cls => {
+            const [y, mo] = (cls.date || '').split('-').map(Number);
+            return y === year && (mo - 1) === m;
+        });
+        const mHours = mClasses
+            .reduce((sum, cls) => sum + getClassDurationHours(cls), 0);
+        return { month: m, count: mClasses.length, hours: mHours };
     });
+
+    // Unique students with details
+    const students = [...studentIds]
+        .map(sid => appState.students.find(s => s.id === sid))
+        .filter(Boolean)
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     return {
         totalClasses: classes.length,
         totalStudents: studentIds.size,
+        hoursThisMonth: Number.isFinite(monthlyHours) ? monthlyHours : 0,
+        monthlyBreakdown,
+        students,
     };
 }
 
@@ -368,6 +543,9 @@ async function addClass(day, startTime, endTime, studentIds) {
             monitorName = appState.selectedMonitor ? getMonitorById(appState.selectedMonitor)?.name : null;
         }
 
+        const commentsInput = document.getElementById('classComments');
+        const comments = commentsInput ? commentsInput.value.trim() : '';
+
         const newClass = {
             id: generateId(),
             day,
@@ -380,6 +558,7 @@ async function addClass(day, startTime, endTime, studentIds) {
             isCompleted: false,
             monitorId,
             monitorName,
+            comments,
         };
 
         try {
@@ -406,7 +585,7 @@ async function addClass(day, startTime, endTime, studentIds) {
     }
 }
 
-async function updateClass(classId, updates) {
+async function updateClass(classId, updates, silent = false) {
     try {
         try {
             await db.updateClass(classId, updates);
@@ -416,7 +595,7 @@ async function updateClass(classId, updates) {
             }
             renderCalendar();
             saveToLocalStorage();
-            showToast('Clase actualizada', 'success');
+            if (!silent) showToast('Clase actualizada', 'success');
         } catch (dbError) {
             console.warn('db.updateClass falló, aplicando cambio localmente:', dbError);
             const classIndex = appState.classes.findIndex(c => c.id === classId);
@@ -425,7 +604,7 @@ async function updateClass(classId, updates) {
             }
             renderCalendar();
             saveToLocalStorage();
-            showToast('Clase actualizada localmente (sin conexión)', 'warning');
+            if (!silent) showToast('Clase actualizada localmente (sin conexión)', 'warning');
         }
     } catch (error) {
         console.error('Error updating class:', error);
@@ -437,17 +616,24 @@ async function deleteClass(classId) {
     try {
         try {
             await db.deleteClass(classId);
-            appState.classes = appState.classes.filter(c => c.id !== classId);
-            renderCalendar();
+            // Refrescamos datos desde Supabase para asegurar consistencia
+            try {
+                await loadAllData();
+            } catch (reloadError) {
+                console.warn('No se pudieron recargar los datos tras borrar la clase, actualizando solo en memoria:', reloadError);
+                appState.classes = appState.classes.filter(c => c.id !== classId);
+            }
             saveToLocalStorage();
             showToast('Clase eliminada', 'success');
         } catch (dbError) {
             console.warn('db.deleteClass falló, eliminando localmente:', dbError);
             appState.classes = appState.classes.filter(c => c.id !== classId);
-            renderCalendar();
             saveToLocalStorage();
             showToast('Clase eliminada localmente (sin conexión)', 'warning');
         }
+        // En cualquier caso, limpiamos la selección y redibujamos el calendario
+        appState.selectedClass = null;
+        renderCalendar();
     } catch (error) {
         console.error('Error deleting class:', error);
         showToast('Error al eliminar clase', 'error');
@@ -564,21 +750,192 @@ function loadFromLocalStorage() {
 
 function renderCalendar() {
     const grid = document.getElementById('calendarGrid');
-    if (!grid) {
-        console.warn('renderCalendar: element #calendarGrid not found');
-        return;
-    }
-    grid.innerHTML = '';
+    const monthGrid = document.getElementById('monthCalendarGrid');
 
     if (!appState.currentWeekStart) {
         appState.currentWeekStart = getMonday(new Date());
     }
 
-    renderTimeColumn(grid);
-
-    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-        renderDayColumn(grid, dayIndex);
+    if (!appState.currentMonthDate) {
+        appState.currentMonthDate = new Date();
     }
+
+    const isMobile = window.innerWidth <= 768;
+
+    if (isMobile && monthGrid) {
+        renderMonthCalendar();
+    }
+
+    if (grid) {
+        grid.innerHTML = '';
+
+        renderTimeColumn(grid);
+
+        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+            renderDayColumn(grid, dayIndex);
+        }
+    } else {
+        console.warn('renderCalendar: element #calendarGrid not found');
+    }
+}
+
+function getClassesForDate(targetDate) {
+    const target = new Date(targetDate);
+
+    let classes = appState.classes.filter(cls => {
+        if (!cls.date) return false;
+        return isSameCalendarDay(cls.date, target);
+    });
+
+    if (isMonitor()) {
+        const currentUser = getCurrentUser();
+        classes = classes.filter(cls => cls.monitorId === currentUser.id);
+    }
+
+    if (isCoordinator() && appState.viewingMonitorId) {
+        classes = classes.filter(cls => cls.monitorId === appState.viewingMonitorId);
+    }
+
+    classes.sort((a, b) => timeStringToMinutes(a.startTime) - timeStringToMinutes(b.startTime));
+    return classes;
+}
+
+function renderMonthCalendar() {
+    const monthGrid = document.getElementById('monthCalendarGrid');
+    if (!monthGrid) return;
+
+    const baseDate = new Date(appState.currentMonthDate || new Date());
+    const year = baseDate.getFullYear();
+    const month = baseDate.getMonth();
+
+    const firstOfMonth = new Date(year, month, 1);
+    const startDay = (firstOfMonth.getDay() + 6) % 7; // 0 = lunes
+
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const monthTitleEl = document.getElementById('monthTitle');
+    if (monthTitleEl) {
+        monthTitleEl.textContent = formatMonthYearSpanish(baseDate);
+        monthTitleEl.setAttribute('aria-hidden', 'false');
+    }
+
+    monthGrid.innerHTML = '';
+
+    const todayStr = formatDateISO(new Date());
+    const selectedDayStr = appState.selectedDayDate ? formatDateISO(appState.selectedDayDate) : null;
+
+    const totalCells = Math.ceil((startDay + daysInMonth) / 7) * 7;
+    for (let cellIndex = 0; cellIndex < totalCells; cellIndex++) {
+        const cell = document.createElement('div');
+        cell.className = 'month-day-cell';
+
+        const dayNumber = cellIndex - startDay + 1;
+        if (dayNumber < 1 || dayNumber > daysInMonth) {
+            cell.classList.add('empty');
+            monthGrid.appendChild(cell);
+            continue;
+        }
+
+        const cellDate = new Date(year, month, dayNumber);
+        const cellDateStr = formatDateISO(cellDate);
+
+        const classesForDay = getClassesForDate(cellDate);
+
+        const hasClasses = classesForDay.length > 0;
+        if (hasClasses) cell.classList.add('has-classes');
+
+        if (cellDateStr === todayStr) {
+            cell.classList.add('today');
+        }
+
+        if (selectedDayStr && cellDateStr === selectedDayStr) {
+            cell.classList.add('selected-day');
+        }
+
+        const dayLabel = document.createElement('div');
+        dayLabel.className = 'month-day-number';
+        dayLabel.textContent = String(dayNumber);
+        cell.appendChild(dayLabel);
+
+        if (hasClasses) {
+            const badge = document.createElement('div');
+            badge.className = 'month-day-badge';
+            // En móvil solo mostramos el número de clases (ej: "3")
+            badge.textContent = `${classesForDay.length}`;
+            cell.appendChild(badge);
+        }
+
+        cell.addEventListener('click', () => {
+            appState.selectedDayDate = cellDate.toISOString();
+            renderDayClassesPanel(cellDate);
+            // Re-render month to actualizar el resaltado del día seleccionado
+            renderMonthCalendar();
+        });
+
+        monthGrid.appendChild(cell);
+    }
+
+    if (!appState.selectedDayDate) {
+        appState.selectedDayDate = new Date(year, month, new Date().getDate()).toISOString();
+    }
+    renderDayClassesPanel(new Date(appState.selectedDayDate));
+}
+
+function getClassesForDateAndHour(date, hour) {
+    const classesForDay = getClassesForDate(date);
+    return classesForDay.filter(cls => {
+        if (!cls.startTime) return false;
+        const startHour = parseInt(cls.startTime.split(':')[0], 10);
+        return startHour === hour;
+    });
+}
+
+function renderDayClassesPanel(date) {
+    const panel = document.getElementById('dayClassesPanel');
+    const titleEl = document.getElementById('dayClassesTitle');
+    const gridEl = document.getElementById('dayViewGrid');
+    if (!panel || !titleEl || !gridEl) return;
+
+    const d = new Date(date);
+    const weekdayIndex = (d.getDay() + 6) % 7; // 0=Lunes
+    const weekdayName = CONFIG.days[weekdayIndex];
+
+    titleEl.textContent = `${weekdayName} ${formatDate(d)}`;
+
+    const classesForDay = getClassesForDate(d);
+    gridEl.innerHTML = '';
+    const timeColumn = document.createElement('div');
+    timeColumn.className = 'time-column day-view-time-column';
+
+    const dayColumn = document.createElement('div');
+    dayColumn.className = 'day-column day-view-day-column';
+
+    for (let hour = CONFIG.hoursStart; hour < CONFIG.hoursEnd; hour++) {
+        const timeSlot = document.createElement('div');
+        timeSlot.className = 'time-slot';
+        timeSlot.textContent = `${String(hour).padStart(2, '0')}:00`;
+        timeColumn.appendChild(timeSlot);
+
+        const cell = document.createElement('div');
+        cell.className = 'calendar-cell';
+
+        const classesInSlot = getClassesForDateAndHour(d, hour);
+        if (classesInSlot.length > 0) {
+            classesInSlot.forEach(cls => {
+                const classCard = createClassCard(cls);
+                cell.appendChild(classCard);
+            });
+            cell.classList.add('has-class');
+        }
+
+        dayColumn.appendChild(cell);
+    }
+
+    gridEl.appendChild(timeColumn);
+    gridEl.appendChild(dayColumn);
+
+    // Guardar el día actualmente mostrado para el botón de añadir desde vista diaria
+    appState.selectedDayDate = d.toISOString();
 }
 
 function renderTimeColumn(grid) {
@@ -674,15 +1031,23 @@ function createClassCard(cls) {
     card.style.height = `${cardHeight}px`;
     card.style.boxSizing = 'border-box';
 
+
+    // Mejor separación visual: el nombre del monitor va debajo de la hora, con margen
     let monitorDisplay = '';
     if (isCoordinator() && cls.monitorName) {
         monitorDisplay = `<div class="class-card-monitor">👤 ${cls.monitorName}</div>`;
     }
 
+    const hasComments = cls.comments != null && String(cls.comments).trim().length > 0;
+    const commentsIndicator = hasComments
+        ? `<div class="class-card-comments-indicator" title="Esta clase tiene comentarios del monitor">💬</div>`
+        : '';
+
     card.innerHTML = `
         <div class="class-card-time">${cls.startTime} - ${cls.endTime}</div>
-        <div class="class-card-occupancy">${studentsCount}/${maxCapacity}</div>
         ${monitorDisplay}
+        <div class="class-card-occupancy">${studentsCount}/${maxCapacity}</div>
+        ${commentsIndicator}
     `;
 
     // Add resize handle for adjusting duration visually
@@ -691,7 +1056,7 @@ function createClassCard(cls) {
     resizeHandle.title = 'Arrastrar para ajustar duración';
     card.appendChild(resizeHandle);
 
-    // Resize logic: snap to 15 minutes
+    // Resize logic con ratón: snap a 15 minutos
     resizeHandle.addEventListener('mousedown', (startEvent) => {
         startEvent.stopPropagation();
         startEvent.preventDefault();
@@ -732,14 +1097,14 @@ function createClassCard(cls) {
             const newEndTime = addMinutesToTime(cls.startTime, finalDuration);
 
             // Update class locally first for instant feedback and mark pending save
-            markClassPendingSave(cls.id, { endTime: newEndTime });
+            markClassPendingSave(cls.id, { endTime: newEndTime, date: cls.date });
         }
 
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-    });
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
 
-    // Drag-to-move logic: change start time by dragging the card vertically and change day by dragging horizontally
+    // Drag-to-move logic con ratón: change start time by dragging the card vertically and change day by dragging horizontally
     card.addEventListener('mousedown', (startEvent) => {
         // Ignore right-clicks and interactions that started on the resize handle
         if (startEvent.button !== 0) return;
@@ -817,6 +1182,12 @@ function createClassCard(cls) {
                 return;
             }
 
+            // Comprobar solapamiento con otra clase antes de aplicar cambios
+            if (hasClassTimeConflict(newDate, newStartTime, newEndTime, cls.id)) {
+                showToast('No se puede mover la clase: ya hay otra en ese horario', 'error');
+                return;
+            }
+
             // Update class locally first and mark pending save
             markClassPendingSave(cls.id, { startTime: newStartTime, endTime: newEndTime, day: newDay, date: newDate });
         }
@@ -825,8 +1196,211 @@ function createClassCard(cls) {
         document.addEventListener('mouseup', onMouseUp);
     });
 
+    // Drag-to-move logic en dispositivos táctiles (touch) con pulsación prolongada:
+    // toque corto → abre detalles; mantener pulsado unos ms → entra en modo arrastre.
+    // El movimiento queda limitado al área de la columna de día para que
+    // la tarjeta no se pueda arrastrar por toda la interfaz.
+    if (isTouchDevice()) {
+        card.addEventListener('touchstart', (startEvent) => {
+            const touch = startEvent.touches[0];
+            if (!touch) return;
+
+            const rootStyles = getComputedStyle(document.documentElement);
+            const slotHeight = parseInt(rootStyles.getPropertyValue('--slot-height'), 10) || 60;
+            const pixelsPerMinute = slotHeight / 60;
+
+            const sampleCell = document.querySelector('.calendar-cell');
+            const dayCellWidth = sampleCell ? sampleCell.getBoundingClientRect().width : 140;
+
+            const pressStartX = touch.clientX;
+            const pressStartY = touch.clientY;
+            const initialStartMinutes = startMinutes;
+            const duration = durationMinutes;
+            const initialDayIndex = CONFIG.days.indexOf(cls.day);
+
+            let dragging = false;
+            let movedDuringPress = false;
+
+            // Estas variables guardarán el punto de origen exacto del arrastre
+            let dragStartX = 0;
+            let dragStartY = 0;
+
+            // Límites del arrastre dentro de la columna de día
+            let minDeltaY = -Infinity;
+            let maxDeltaY = Infinity;
+            let minDeltaX = -Infinity;
+            let maxDeltaX = Infinity;
+
+            // Contenedor que se desplazará (scroll) cuando arrastremos cerca de sus bordes
+            let scrollContainer = null;
+
+            card.style.zIndex = 9999;
+
+            const longPressDelay = 350; 
+            const longPressTimer = setTimeout(() => {
+                if (movedDuringPress) return;
+                
+                dragging = true;
+                // Capturamos la posición actual del dedo justo cuando 
+                // se activa el drag para que el movimiento empiece desde 0
+                dragStartX = lastTouchX;
+                dragStartY = lastTouchY;
+
+                // Calculamos los límites permitidos dentro de la columna de día
+                const cardRect = card.getBoundingClientRect();
+                const containerEl = card.closest('.day-view-day-column') || card.closest('.day-column');
+                if (containerEl) {
+                    const containerRect = containerEl.getBoundingClientRect();
+                    minDeltaY = containerRect.top - cardRect.top;
+                    maxDeltaY = containerRect.bottom - cardRect.bottom;
+                    minDeltaX = containerRect.left - cardRect.left;
+                    maxDeltaX = containerRect.right - cardRect.right;
+
+                    // El contenedor scrollable principal será la rejilla de vista de día, si existe
+                    scrollContainer = containerEl.closest('.day-view-grid') || containerEl.parentElement;
+                }
+
+                document.body.style.userSelect = 'none';
+                document.body.style.webkitUserSelect = 'none';
+                
+                // Feedback táctil (opcional)
+                if (window.navigator.vibrate) window.navigator.vibrate(50);
+            }, longPressDelay);
+
+            let lastTouchX = pressStartX;
+            let lastTouchY = pressStartY;
+            let lastScrollY = window.scrollY;
+
+            // Últimos desplazamientos efectivos (clampados a los límites)
+            let lastDragDeltaX = 0;
+            let lastDragDeltaY = 0;
+
+            function onTouchMove(ev) {
+                const t = ev.touches[0];
+                if (!t) return;
+
+                lastTouchX = t.clientX;
+                lastTouchY = t.clientY;
+
+                if (!dragging) {
+                    const deltaPressY = t.clientY - pressStartY;
+                    const deltaPressX = t.clientX - pressStartX;
+                    // Si se mueve más de 10px antes de los 350ms, cancelamos el drag para permitir scroll normal
+                    if (Math.abs(deltaPressX) > 10 || Math.abs(deltaPressY) > 10) {
+                        movedDuringPress = true;
+                        clearTimeout(longPressTimer);
+                    }
+                    return;
+                }
+
+                // En modo arrastre bloqueamos el scroll de la página y
+                // desplazamos solo el contenedor de horas si nos acercamos a sus bordes
+                ev.preventDefault();
+
+                if (scrollContainer) {
+                    const rect = scrollContainer.getBoundingClientRect();
+                    const edgeThreshold = 60; // px desde el borde superior/inferior del contenedor
+                    let scrollDelta = 0;
+
+                    if (lastTouchY > rect.bottom - edgeThreshold) {
+                        scrollDelta = 10; // desplazar horas hacia abajo
+                    } else if (lastTouchY < rect.top + edgeThreshold) {
+                        scrollDelta = -10; // desplazar horas hacia arriba
+                    }
+
+                    if (scrollDelta !== 0) {
+                        scrollContainer.scrollTop += scrollDelta;
+                    }
+                }
+
+                // Usamos requestAnimationFrame para que el movimiento sea a 60fps (suave)
+                requestAnimationFrame(() => {
+                    if (!dragging) return;
+                    let deltaY = t.clientY - dragStartY;
+                    let deltaX = t.clientX - dragStartX;
+
+                    // Limitar movimiento a la columna de día
+                    deltaY = Math.min(Math.max(deltaY, minDeltaY), maxDeltaY);
+                    deltaX = Math.min(Math.max(deltaX, minDeltaX), maxDeltaX);
+
+                    lastDragDeltaY = deltaY;
+                    lastDragDeltaX = deltaX;
+
+                    card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+                });
+            }
+
+            function onTouchEnd(ev) {
+                clearTimeout(longPressTimer);
+                document.removeEventListener('touchmove', onTouchMove);
+                document.removeEventListener('touchend', onTouchEnd);
+                
+                card.style.zIndex = '';
+                document.body.style.userSelect = '';
+                document.body.style.webkitUserSelect = '';
+
+                if (!dragging) {
+                    if (!movedDuringPress) showClassDetails(cls.id);
+                    return;
+                }
+
+                // Usamos los últimos desplazamientos clampados para que
+                // el resultado coincida visualmente con la posición final.
+                const deltaY = lastDragDeltaY;
+                const deltaX = lastDragDeltaX;
+                
+                card.style.transform = '';
+                dragging = false;
+
+                // Lógica de guardado (reutilizando tus funciones existentes)
+                const rawDeltaMinutes = Math.round(deltaY / pixelsPerMinute);
+                const snappedMinutes = Math.round(rawDeltaMinutes / CONFIG.snapMinutes) * CONFIG.snapMinutes;
+
+                let finalStart = initialStartMinutes + snappedMinutes;
+                const minStart = CONFIG.hoursStart * 60;
+                const maxStart = (CONFIG.hoursEnd * 60) - duration;
+                if (finalStart < minStart) finalStart = minStart;
+                if (finalStart > maxStart) finalStart = maxStart;
+
+                const finalEnd = finalStart + duration;
+
+                let dayShift = 0;
+                const weekContainer = document.getElementById('weekCalendarContainer');
+                if (weekContainer && window.getComputedStyle(weekContainer).display !== 'none') {
+                    dayShift = Math.round(deltaX / dayCellWidth);
+                }
+
+                let finalDayIndex = initialDayIndex + dayShift;
+                if (finalDayIndex < 0) finalDayIndex = 0;
+                if (finalDayIndex > 6) finalDayIndex = 6;
+
+                const candidateStart = minutesToTime(finalStart);
+                const candidateEnd = minutesToTime(finalEnd);
+                const candidateDate = getDateForDay(appState.currentWeekStart, finalDayIndex).toISOString();
+
+                // Comprobar solapamiento con otra clase antes de aplicar cambios
+                if (hasClassTimeConflict(candidateDate, candidateStart, candidateEnd, cls.id)) {
+                    showToast('No se puede mover la clase: ya hay otra en ese horario', 'error');
+                    return;
+                }
+
+                markClassPendingSave(cls.id, {
+                    startTime: candidateStart,
+                    endTime: candidateEnd,
+                    day: CONFIG.days[finalDayIndex],
+                    date: candidateDate
+                });
+            }
+
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+            document.addEventListener('touchend', onTouchEnd);
+        });
+    }
+
     card.addEventListener('click', (e) => {
         e.stopPropagation();
+        // En dispositivos táctiles el tap ya se gestiona en touchend.
+        if (isTouchDevice()) return;
         showClassDetails(cls.id);
     });
 
@@ -919,7 +1493,15 @@ function renderStudentsDropdown(filter = '') {
         const label = document.createElement('label');
         label.htmlFor = `dd-student-${s.id}`;
         label.style.cursor = 'pointer';
-        label.innerHTML = `<strong style="display:block">${s.name}</strong><div class="meta">${s.email || ''}</div>`;
+
+        const metaParts = [];
+        if (s.email) metaParts.push(s.email);
+        if (s.phone) metaParts.push(s.phone);
+
+        label.innerHTML = `
+            <strong style="display:block">${s.name}</strong>
+            <div class="meta">${metaParts.join(' · ')}</div>
+        `;
 
         left.appendChild(checkbox);
         left.appendChild(label);
@@ -1126,6 +1708,29 @@ function markClassPendingSave(classId, updates) {
 async function performPendingSave() {
     if (!appState.pendingSave) return;
     const { classId, updates } = appState.pendingSave;
+
+    // Validar que los cambios de hora/día no solapan con otra clase antes de guardar
+    const clsIndex = appState.classes.findIndex(c => c.id === classId);
+    if (clsIndex !== -1) {
+        const current = appState.classes[clsIndex];
+        const candidateDate = new Date(updates.date || current.date);
+        const candidateStartTime = updates.startTime || current.startTime;
+        const candidateEndTime = updates.endTime || current.endTime;
+
+        if (hasClassTimeConflict(candidateDate, candidateStartTime, candidateEndTime, classId)) {
+            // Revertir a la posición original si hay conflicto y limpiar el estado pendiente
+            showToast('No se puede mover la clase: ya hay otra en ese horario', 'error');
+            if (appState.pendingSave && appState.pendingSave.original) {
+                appState.classes[clsIndex] = appState.pendingSave.original;
+            }
+            appState.pendingSave = null;
+            saveToLocalStorage();
+            renderCalendar();
+            if (appState.selectedClass === classId) showClassDetails(classId);
+            return;
+        }
+    }
+
     try {
         showLoading('Guardando cambios...');
         await updateClass(classId, updates);
@@ -1166,7 +1771,35 @@ function renderWeekTitle() {
     const startStr = formatDate(weekStart);
     const endStr = formatDate(weekEnd);
 
-    title.textContent = `Semana del ${startStr} - ${endStr}`;
+    const monitorHeader = document.getElementById('monitorViewHeader');
+    const monitorViewTitle = document.getElementById('monitorViewTitle');
+    if (appState.viewingMonitorId) {
+        const monitor = getMonitorById(appState.viewingMonitorId);
+        const monitorName = monitor ? monitor.name : '';
+        title.textContent = `Clases de ${monitorName}`;
+        if (monitorHeader) monitorHeader.style.display = 'flex';
+        if (monitorViewTitle) monitorViewTitle.textContent = monitorName;
+    } else {
+        title.textContent = `Semana del ${startStr} - ${endStr}`;
+        if (monitorHeader) monitorHeader.style.display = 'none';
+    }
+    setupMonthYearSelectors();
+
+    // Sincronizar el título de semana en el panel de coordinador
+    const coordTitle = document.getElementById('coordWeekTitle');
+    if (coordTitle) coordTitle.textContent = `${startStr} – ${endStr}`;
+}
+
+// Setup listeners para los selectores de mes y año (llamar tras renderizar cabecera)
+function setupMonthYearSelectors() {
+    // Solo actualiza los títulos de mes y año. Los listeners se configuran
+    // una única vez en initializeEventListeners() para evitar duplicados.
+    const monthTitle = document.getElementById('monthTitle');
+    const yearTitle = document.getElementById('yearTitle');
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+    if (monthTitle) monthTitle.textContent = monthNames[date.getMonth()];
+    if (yearTitle) yearTitle.textContent = date.getFullYear();
 }
 
 function renderMonitorsList() {
@@ -1185,6 +1818,16 @@ function renderMonitorsList() {
         const card = document.createElement('div');
         card.className = 'monitor-card';
 
+        const studentList = stats.students.length > 0
+            ? stats.students.map(s => `
+                <div class="monitor-student-item">
+                    <span class="monitor-student-name">${s.name}</span>
+                    <span class="monitor-student-level">${s.level || '—'}</span>
+                </div>`).join('')
+            : '<p class="monitor-no-students">Sin alumnos registrados</p>';
+
+        const currentYear = new Date().getFullYear();
+
         card.innerHTML = `
             <div class="monitor-card-header">
                 <h3>👤 ${monitor.name}</h3>
@@ -1198,20 +1841,140 @@ function renderMonitorsList() {
                 <p>📧 ${monitor.email || 'Sin email'}</p>
                 <p>📞 ${monitor.phone || 'Sin teléfono'}</p>
             </div>
-            <div class="monitor-card-stats">
-                <div class="stat-item">
-                    <span class="stat-value">${stats.totalClasses}</span>
-                    <span class="stat-label">Clases</span>
+            <button class="monitor-details-toggle" onclick="toggleMonitorDetails(this)">
+                Ver detalles ▼
+            </button>
+            <div class="monitor-details-panel" style="display:none;">
+                <div class="monitor-details-section">
+                    <div class="monitor-month-year-nav">
+                        <button class="monitor-year-btn" onclick="changeMonitorYear(this, '${monitor.id}', -1)">&#8249;</button>
+                        <span class="monitor-year-label" data-year="${currentYear}">${currentYear}</span>
+                        <button class="monitor-year-btn" onclick="changeMonitorYear(this, '${monitor.id}', 1)">&#8250;</button>
+                    </div>
+                    <table class="monitor-month-table">
+                        <thead>
+                            <tr><th>Mes</th><th>Clases</th><th>Horas</th></tr>
+                        </thead>
+                        <tbody id="month-tbody-${monitor.id}">${buildMonthRows(monitor.id, currentYear)}</tbody>
+                    </table>
                 </div>
-                <div class="stat-item">
-                    <span class="stat-value">${stats.totalStudents}</span>
-                    <span class="stat-label">Alumnos</span>
+                <div class="monitor-details-section">
+                    <h4>Alumnos asociados (${stats.students.length})</h4>
+                    <div class="monitor-students-list">${studentList}</div>
                 </div>
             </div>
         `;
 
         container.appendChild(card);
     });
+}
+
+function toggleMonitorDetails(btn) {
+    const panel = btn.nextElementSibling;
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    btn.textContent = open ? 'Ocultar detalles ▲' : 'Ver detalles ▼';
+}
+
+function buildMonthRows(monitorId, year) {
+    const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    const classes = appState.classes.filter(c => c.monitorId === monitorId);
+    return monthNames.map((name, m) => {
+        const mClasses = classes.filter(cls => {
+            const [y, mo] = (cls.date || '').split('-').map(Number);
+            return y === year && (mo - 1) === m;
+        });
+        const mHours = mClasses.reduce((sum, cls) => sum + getClassDurationHours(cls), 0);
+        const empty = mClasses.length === 0;
+
+        const sorted = mClasses.sort((a, b) =>
+            (a.date || '').localeCompare(b.date || '') || (a.startTime || '').localeCompare(b.startTime || ''));
+
+        const detailRows = sorted.map(cls => {
+            const h = getClassDurationHours(cls);
+            const [, , dd] = (cls.date || '').split('-');
+            const studentCount = cls.students ? cls.students.length : 0;
+            return `<tr class="month-class-detail-row">
+                <td style="padding-left:1.5rem;font-size:0.78rem;color:var(--gray-600);">
+                    ${name} ${parseInt(dd,10)} · ${cls.startTime}–${cls.endTime} · ${studentCount} alumnos
+                </td>
+                <td style="font-size:0.78rem;color:var(--gray-600);text-align:center;">${h.toFixed(1)}</td>
+                <td style="text-align:center;">
+                    <input type="checkbox" class="paid-checkbox" data-class-id="${cls.id}"
+                        ${cls.paid ? 'checked' : ''}
+                        onchange="toggleClassPaid('${cls.id}', this.checked)"
+                        style="width:16px;height:16px;cursor:pointer;accent-color:var(--primary-green);">
+                </td>
+            </tr>`;
+        }).join('');
+
+        const detailHtml = empty ? '' : `
+            <tr class="month-detail-container" style="display:none;">
+                <td colspan="3" style="padding:0;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <tr>
+                            <td colspan="3" style="padding:0.3rem 1.5rem;">
+                                <button onclick="payAllMonthClasses(this, '${monitorId}', ${year}, ${m})"
+                                    style="font-size:0.75rem;padding:3px 10px;background:var(--primary-green);color:white;border:none;border-radius:4px;cursor:pointer;">
+                                    Pagar todas las clases
+                                </button>
+                            </td>
+                        </tr>
+                        ${detailRows}
+                    </table>
+                </td>
+            </tr>`;
+
+        const clickAttr = empty ? '' : `style="cursor:pointer;" onclick="toggleMonthDetail(this)"`;
+        return `<tr class="${empty ? 'month-row-empty' : 'month-row-clickable'}" ${clickAttr}>
+            <td>${name}${empty ? '' : ' <span class="month-expand-icon">▸</span>'}</td>
+            <td>${mClasses.length}</td>
+            <td>${mHours.toFixed(1)}</td>
+        </tr>${detailHtml}`;
+    }).join('');
+}
+
+function toggleMonthDetail(row) {
+    const detailRow = row.nextElementSibling;
+    if (!detailRow || !detailRow.classList.contains('month-detail-container')) return;
+    const open = detailRow.style.display === 'none';
+    detailRow.style.display = open ? '' : 'none';
+    const icon = row.querySelector('.month-expand-icon');
+    if (icon) icon.textContent = open ? '▾' : '▸';
+}
+
+async function toggleClassPaid(classId, newPaid) {
+    const cls = appState.classes.find(c => c.id === classId);
+    if (!cls) return;
+    cls.paid = newPaid;
+    await updateClass(classId, { paid: newPaid }, true);
+}
+
+async function payAllMonthClasses(btn, monitorId, year, month) {
+    const classes = appState.classes.filter(c => {
+        if (c.monitorId !== monitorId) return false;
+        const [y, mo] = (c.date || '').split('-').map(Number);
+        return y === year && (mo - 1) === month;
+    });
+    await Promise.all(classes.map(cls => {
+        cls.paid = true;
+        return updateClass(cls.id, { paid: true }, true);
+    }));
+    // Update all checkboxes in this detail block without closing the panel
+    const detailRow = btn.closest('tr.month-detail-container');
+    if (detailRow) {
+        detailRow.querySelectorAll('.paid-checkbox').forEach(cb => { cb.checked = true; });
+    }
+}
+
+function changeMonitorYear(btn, monitorId, delta) {
+    const nav = btn.parentElement;
+    const label = nav.querySelector('.monitor-year-label');
+    const newYear = parseInt(label.dataset.year, 10) + delta;
+    label.dataset.year = newYear;
+    label.textContent = newYear;
+    const tbody = document.getElementById(`month-tbody-${monitorId}`);
+    if (tbody) tbody.innerHTML = buildMonthRows(monitorId, newYear);
 }
 
 // ==========================================
@@ -1248,6 +2011,9 @@ function openAddClassModal(day = '', hour = null) {
     // initialize temporary selection for this form
     appState.tempSelectedStudents = [];
     renderStudentsSelector();
+
+    const commentsEl = document.getElementById('classComments');
+    if (commentsEl) commentsEl.value = '';
     openModal('classModal');
 }
 
@@ -1272,6 +2038,9 @@ function openEditClassModal(classId) {
     // initialize temporary selection with class students
     appState.tempSelectedStudents = Array.isArray(cls.students) ? [...cls.students] : [];
     renderStudentsSelector();
+
+    const commentsEl = document.getElementById('classComments');
+    if (commentsEl) commentsEl.value = cls.comments || '';
 
     appState.selectedClass = classId;
     openModal('classModal');
@@ -1321,6 +2090,7 @@ function showClassDetails(classId) {
             <span class="detail-label">Ocupación:</span>
             <span class="detail-value">${cls.students.length}/${cls.maxCapacity} (${occupancyText})${completedBadge}</span>
         </div>
+        ${cls.comments ? `<div class="detail-row"><span class="detail-label">Comentarios:</span><span class="detail-value">${cls.comments}</span></div>` : ''}
         ${studentsHtml}
     `;
 
@@ -1398,6 +2168,11 @@ async function handleClassFormSubmit(e) {
 
     const day = document.getElementById('classDay').value;
 
+    if (!day) {
+        showToast('Debes seleccionar un día', 'error');
+        return;
+    }
+
     const startHour = document.getElementById('classStartHour').value;
     const startMinute = document.getElementById('classStartMinute').value;
     const startTime = `${startHour}:${startMinute}`;
@@ -1405,6 +2180,9 @@ async function handleClassFormSubmit(e) {
     const endHour = document.getElementById('classEndHour').value;
     const endMinute = document.getElementById('classEndMinute').value;
     const endTime = `${endHour}:${endMinute}`;
+
+    const commentsEl = document.getElementById('classComments');
+    const comments = commentsEl ? commentsEl.value.trim() : '';
 
     const selectedStudents = Array.isArray(appState.tempSelectedStudents) ? appState.tempSelectedStudents : [];
 
@@ -1433,16 +2211,24 @@ async function handleClassFormSubmit(e) {
     try {
         showLoading('Guardando clase...');
 
-        if (appState.selectedClass) {
-            const dayIndex = CONFIG.days.indexOf(day);
-            const date = getDateForDay(appState.currentWeekStart, dayIndex);
+        const dayIndex = CONFIG.days.indexOf(day);
+        const date = getDateForDay(appState.currentWeekStart, dayIndex);
+        const excludeId = appState.selectedClass || null;
 
+        if (hasClassTimeConflict(date, startTime, endTime, excludeId)) {
+            hideLoading();
+            showToast('Ya existe otra clase en ese horario para ese día', 'error');
+            return;
+        }
+
+        if (appState.selectedClass) {
             await updateClass(appState.selectedClass, {
                 day,
                 date: date.toISOString(),
                 startTime,
                 endTime,
                 students: selectedStudents,
+                comments,
             });
             appState.selectedClass = null;
         } else {
@@ -1533,14 +2319,89 @@ function navigateWeek(direction) {
     const currentWeek = new Date(appState.currentWeekStart);
     currentWeek.setDate(currentWeek.getDate() + (direction * 7));
     appState.currentWeekStart = currentWeek;
+    // Sincronizar mes y día seleccionado con la nueva semana
+    appState.currentMonthDate = new Date(currentWeek);
+    appState.selectedDayDate = currentWeek.toISOString();
     renderWeekTitle();
     renderCalendar();
 }
 
 function goToToday() {
-    appState.currentWeekStart = getMonday(new Date());
+    const today = new Date();
+    appState.currentWeekStart = getMonday(today);
+    appState.currentMonthDate = new Date(today);
+    appState.selectedDayDate = today.toISOString();
     renderWeekTitle();
     renderCalendar();
+}
+
+// Copiar todas las clases de la semana actual a la semana siguiente
+async function copyCurrentWeekToNext() {
+    try {
+        const sourceWeekStart = new Date(appState.currentWeekStart);
+        const targetWeekStart = new Date(sourceWeekStart);
+        targetWeekStart.setDate(targetWeekStart.getDate() + 7);
+
+        const sourceClasses = getClassesForWeek(sourceWeekStart);
+        if (sourceClasses.length === 0) {
+            showToast('No hay clases en esta semana para copiar', 'error');
+            return;
+        }
+
+        const existingTarget = getClassesForWeek(targetWeekStart);
+        if (existingTarget.length > 0) {
+            const ok = confirm('La semana siguiente ya tiene clases. ¿Quieres copiar igualmente y añadir más?');
+            if (!ok) return;
+        }
+
+        showLoading('Copiando clases a la semana siguiente...');
+
+        const createdClasses = [];
+        for (const cls of sourceClasses) {
+            const dayIndex = CONFIG.days.indexOf(cls.day);
+            const newDate = getDateForDay(targetWeekStart, dayIndex);
+
+            const newClass = {
+                id: generateId(),
+                day: cls.day,
+                date: newDate.toISOString(),
+                startTime: cls.startTime,
+                endTime: cls.endTime,
+                students: [...cls.students],
+                maxCapacity: cls.maxCapacity,
+                status: 'active',
+                isCompleted: false,
+                monitorId: cls.monitorId,
+                monitorName: cls.monitorName,
+                comments: cls.comments || ''
+            };
+
+            try {
+                const result = await db.createClass(newClass);
+                const converted = db.convertClassFromDB(result);
+                appState.classes.push(converted);
+                createdClasses.push(converted);
+            } catch (dbError) {
+                console.warn('Error copiando clase a Supabase, guardando solo localmente:', dbError);
+                appState.classes.push(newClass);
+                createdClasses.push(newClass);
+            }
+        }
+
+        saveToLocalStorage();
+
+        // Movernos visualmente a la semana destino para que el usuario vea el resultado
+        appState.currentWeekStart = targetWeekStart;
+        renderWeekTitle();
+        renderCalendar();
+
+        hideLoading();
+        showToast(`Se copiaron ${createdClasses.length} clases a la semana siguiente`, 'success');
+    } catch (error) {
+        console.error('Error copiando semana:', error);
+        hideLoading();
+        showToast('Error al copiar clases de la semana', 'error');
+    }
 }
 
 // ==========================================
@@ -1740,12 +2601,7 @@ function viewMonitorClasses(monitorId) {
 
     appState.viewingMonitorId = monitorId;
 
-    const weekTitle = document.getElementById('weekTitle');
-    weekTitle.innerHTML = `
-        <button class="btn btn-sm" onclick="backToCoordinatorDashboard()">← Volver al Dashboard</button>
-        Clases de ${monitor.name}
-    `;
-
+    renderWeekTitle();
     renderCalendar();
 }
 
@@ -1753,6 +2609,13 @@ function backToCoordinatorDashboard() {
     appState.viewingMonitorId = null;
     renderWeekTitle();
     showCoordinatorDashboard();
+}
+
+function goHome() {
+    appState.viewingMonitorId = null;
+    appState.currentUser = null;
+    hideMainApp();
+    showLoginScreen();
 }
 
 async function confirmDeleteMonitor(monitorId) {
@@ -1778,7 +2641,11 @@ async function editMonitor(monitorId) {
 // EVENT LISTENERS
 // ==========================================
 
+let _listenersInitialized = false;
 function initializeEventListeners() {
+    if (_listenersInitialized) return;
+    _listenersInitialized = true;
+
     function getEl(id) {
         const el = document.getElementById(id);
         if (!el) console.warn(`initializeEventListeners: element not found: ${id}`);
@@ -1858,6 +2725,85 @@ function initializeEventListeners() {
     const todayBtnEl = getEl('todayBtn');
     if (todayBtnEl) todayBtnEl.addEventListener('click', goToToday);
 
+    const copyWeekBtnEl = getEl('copyWeekBtn');
+    if (copyWeekBtnEl) copyWeekBtnEl.addEventListener('click', copyCurrentWeekToNext);
+
+    // Month/year selectors
+    const monthSelectorEl = getEl('monthSelector');
+    const monthSelectorButton = getEl('monthSelectorButton');
+    const monthSelectorDropdown = getEl('monthSelectorDropdown');
+    const monthTitle = getEl('monthTitle');
+    const yearTitle = getEl('yearTitle');
+
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    function updateMonthYearTitles() {
+        const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+        if (monthTitle) monthTitle.textContent = monthNames[date.getMonth()];
+        if (yearTitle) yearTitle.textContent = date.getFullYear();
+    }
+
+    function setMonthYear(month, year) {
+        const newDate = new Date(year, month, 1);
+        appState.currentMonthDate = newDate;
+        appState.currentWeekStart = getMonday(newDate);
+        appState.selectedDayDate = newDate.toISOString();
+        updateMonthYearTitles();
+        renderWeekTitle();
+        renderCalendar();
+    }
+
+    // Dropdown de meses
+    if (monthSelectorButton && monthSelectorEl && monthSelectorDropdown) {
+        function renderMonthDropdown() {
+            let html = '';
+            for (let m = 0; m < 12; m++) {
+                html += `<li data-month="${m}">${monthNames[m]}</li>`;
+            }
+            monthSelectorDropdown.innerHTML = html;
+        }
+
+        monthSelectorButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            renderMonthDropdown();
+            monthSelectorEl.classList.toggle('open');
+        });
+
+        monthSelectorDropdown.addEventListener('click', (e) => {
+            const li = e.target.closest('li[data-month]');
+            if (!li) return;
+            e.stopPropagation();
+            const monthIndex = parseInt(li.getAttribute('data-month'), 10);
+            if (isNaN(monthIndex)) return;
+            const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+            setMonthYear(monthIndex, date.getFullYear());
+            monthSelectorEl.classList.remove('open');
+        });
+
+        document.addEventListener('click', (e) => {
+            if (monthSelectorEl && !monthSelectorEl.contains(e.target)) {
+                monthSelectorEl.classList.remove('open');
+            }
+        });
+    }
+
+    // Navegación de año con botones ‹ / ›
+    const yearPrevBtn = getEl('yearPrevBtn');
+    const yearNextBtn = getEl('yearNextBtn');
+    if (yearPrevBtn) {
+        yearPrevBtn.onclick = () => {
+            const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+            setMonthYear(date.getMonth(), date.getFullYear() - 1);
+        };
+    }
+    if (yearNextBtn) {
+        yearNextBtn.onclick = () => {
+            const date = appState.currentMonthDate ? new Date(appState.currentMonthDate) : new Date();
+            setMonthYear(date.getMonth(), date.getFullYear() + 1);
+        };
+    }
+
+    updateMonthYearTitles();
+
     // Snap toggle button (15m / 30m)
     const weekNavEl = document.querySelector('.week-navigation');
     if (weekNavEl && !document.getElementById('snapToggleBtn')) {
@@ -1885,7 +2831,13 @@ function initializeEventListeners() {
             e.stopPropagation();
             renderStudentsDropdown();
             openModal('studentsModal');
-            if (studentsModalSearch) { studentsModalSearch.value = ''; studentsModalSearch.focus(); }
+            if (studentsModalSearch) {
+                studentsModalSearch.value = '';
+                // En móvil evitar auto-focus para que no haga zoom la pantalla
+                if (!isTouchDevice()) {
+                    studentsModalSearch.focus();
+                }
+            }
         });
     }
 
@@ -1907,6 +2859,29 @@ function initializeEventListeners() {
         if (header) header.textContent = 'Añadir Alumno';
         openModal('studentModal');
     });
+
+    // Botón + en la vista diaria móvil: crea una clase en el día mostrado y hora actual
+    const addFromDayViewBtn = getEl('addClassFromDayViewBtn');
+    if (addFromDayViewBtn) {
+        addFromDayViewBtn.addEventListener('click', () => {
+            const now = new Date();
+
+            // Tomar como base el día que se está mostrando en la vista diaria
+            const baseDate = appState.selectedDayDate ? new Date(appState.selectedDayDate) : new Date();
+
+            // Usar la hora actual (redondeada a la hora entera) como referencia
+            const currentHour = now.getHours();
+
+            // Aseguramos que la hora esté dentro del rango de la configuración
+            const clampedHour = Math.min(Math.max(currentHour, CONFIG.hoursStart), CONFIG.hoursEnd - 1);
+
+            const weekdayIndex = (baseDate.getDay() + 6) % 7; // 0=Lunes
+            const weekdayName = CONFIG.days[weekdayIndex];
+
+            // Abrimos el modal de nueva clase con el día y la hora sugeridos
+            openAddClassModal(weekdayName, clampedHour);
+        });
+    }
 
     const closeSidebarBtnEl = getEl('closeSidebarBtn');
     if (closeSidebarBtnEl) {
@@ -1943,12 +2918,54 @@ function initializeEventListeners() {
 
 async function initializeApp() {
     try {
-        // Check if Supabase is configured. If not, fallback to localStorage.
+        const loginView = document.getElementById('login-view');
+
+        // Inicializar fechas, títulos y listeners siempre, antes del check de sesión,
+        // para que estén listos cuando el usuario haga login.
+        const today = new Date();
+        appState.currentWeekStart = getMonday(today);
+        appState.currentMonthDate = new Date(today);
+        appState.selectedDayDate = today.toISOString();
+        renderWeekTitle();
+        renderCalendar();
+        initializeEventListeners();
+
+        // Comprobar sesión de Supabase
+        if (typeof supabase !== 'undefined' && supabase) {
+            try {
+                const { data, error } = await supabase.auth.getSession();
+                if (error) {
+                    console.warn('No se pudo obtener la sesión de Supabase al iniciar:', error);
+                }
+
+                const hasSession = data && data.session;
+
+                if (!hasSession) {
+                    if (loginView) loginView.style.display = 'flex';
+                    hideLoginScreen();
+                    hideMainApp();
+                    hideLoading();
+                    return;
+                } else {
+                    if (loginView) loginView.style.display = 'none';
+                }
+            } catch (sessionError) {
+                console.warn('Error comprobando sesión de Supabase al iniciar:', sessionError);
+                if (loginView) loginView.style.display = 'flex';
+                hideLoginScreen();
+                hideMainApp();
+                hideLoading();
+                return;
+            }
+        } else {
+            if (loginView) loginView.style.display = 'none';
+        }
+
+        // Cargar datos
         if (typeof supabase === 'undefined' || !supabase) {
             console.warn('Supabase no está configurado. Usando datos locales (localStorage) como fallback.');
             loadFromLocalStorage();
         } else {
-            // Try loading data from Supabase, but fallback to localStorage on error
             try {
                 await loadAllData();
             } catch (loadError) {
@@ -1956,12 +2973,6 @@ async function initializeApp() {
                 loadFromLocalStorage();
             }
         }
-
-        // Set current week
-        appState.currentWeekStart = getMonday(new Date());
-
-        // Initialize event listeners
-        initializeEventListeners();
 
         // Check if user is logged in (from localStorage)
         const savedUser = localStorage.getItem('padelApp_currentUser');
@@ -1982,6 +2993,172 @@ async function initializeApp() {
 
     // Prevent clicks inside dropdown from closing it via document click
     // No special stopPropagation needed for modal; modal background click handler closes modal already.
+
+// ==========================================
+// EXCEL EXPORT (coordinator only, desktop)
+// ==========================================
+
+const EXCEL_COLORS = {
+    greenDark:   '1B5E20', // semana header bg
+    greenMed:    '2E7D32', // días semana bg
+    greenLight:  'C8E6C9', // monitor header bg
+    timeBg:      'FFF8E1', // fila de horas bg
+    timeFont:    'E65100', // texto horas
+    white:       'FFFFFF',
+    gray:        'F5F5F5',
+};
+
+function styleCell(cell, { bgColor, fontColor, bold = false, fontSize = 11, italic = false } = {}) {
+    if (bgColor) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + bgColor } };
+    cell.font = { bold, italic, size: fontSize, color: { argb: 'FF' + (fontColor || '000000') } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+}
+
+async function exportToExcel() {
+    if (typeof ExcelJS === 'undefined') {
+        showToast('La librería Excel no está cargada. Recarga la página.', 'error');
+        return;
+    }
+    const monitors = appState.monitors;
+    if (monitors.length === 0) {
+        showToast('No hay monitores para exportar', 'warning');
+        return;
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Padel Pro Manager';
+
+    for (const monitor of monitors) {
+        const safeName = monitor.name.substring(0, 31).replace(/[:\\/?*[\]]/g, '-');
+        const sheet = workbook.addWorksheet(safeName);
+        sheet.columns = Array(8).fill({ width: 22 });
+        buildMonitorSheet(sheet, monitor);
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Clases_Padel_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Excel exportado correctamente', 'success');
+}
+
+function buildMonitorSheet(sheet, monitor) {
+    const dayNames = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO'];
+    const classes = appState.classes.filter(c => c.monitorId === monitor.id);
+
+    // Monitor name header
+    const headerRow = sheet.addRow([`Monitor: ${monitor.name}`]);
+    sheet.mergeCells(headerRow.number, 1, headerRow.number, 8);
+    styleCell(headerRow.getCell(1), { bgColor: EXCEL_COLORS.greenLight, fontColor: EXCEL_COLORS.greenDark, bold: true, fontSize: 13 });
+    headerRow.height = 22;
+    sheet.addRow([]);
+
+    if (classes.length === 0) {
+        sheet.addRow(['Sin clases registradas']);
+        return;
+    }
+
+    // Group by week
+    const weekMap = {};
+    const fmt = d => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+
+    // Helper: parse date string safely, ignoring time part
+    function parseDate(dateStr) {
+        if (!dateStr) return null;
+        const clean = String(dateStr).slice(0, 10); // "YYYY-MM-DD"
+        const [y, mo, dd] = clean.split('-').map(Number);
+        if (!y || !mo || !dd || isNaN(y) || isNaN(mo) || isNaN(dd)) return null;
+        return { y, mo, dd, date: new Date(y, mo - 1, dd) };
+    }
+
+    classes.forEach(cls => {
+        const parsed = parseDate(cls.date);
+        if (!parsed) return;
+        const { y, mo, dd, date } = parsed;
+        const dayOfWeek = (date.getDay() + 6) % 7;
+        const monday = new Date(y, mo - 1, dd - dayOfWeek);
+        const weekKey = `${monday.getFullYear()}-${String(monday.getMonth()+1).padStart(2,'0')}-${String(monday.getDate()).padStart(2,'0')}`;
+        if (!weekMap[weekKey]) weekMap[weekKey] = { monday, classes: [] };
+        weekMap[weekKey].classes.push(cls);
+    });
+
+    Object.keys(weekMap).sort().forEach(weekKey => {
+        const { monday, classes: weekClasses } = weekMap[weekKey];
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+
+        // Week header row
+        const weekRow = sheet.addRow([`SEMANA: ${fmt(monday)} - ${fmt(sunday)}`]);
+        sheet.mergeCells(weekRow.number, 1, weekRow.number, 8);
+        styleCell(weekRow.getCell(1), { bgColor: EXCEL_COLORS.greenDark, fontColor: EXCEL_COLORS.white, bold: true, fontSize: 11 });
+        weekRow.height = 18;
+
+        // Day names header row
+        const dayRow = sheet.addRow(['', ...dayNames]);
+        dayRow.getCell(1).value = '';
+        styleCell(dayRow.getCell(1), { bgColor: EXCEL_COLORS.greenMed });
+        dayNames.forEach((_, i) => {
+            styleCell(dayRow.getCell(i + 2), { bgColor: EXCEL_COLORS.greenMed, fontColor: EXCEL_COLORS.white, bold: true });
+        });
+        dayRow.height = 18;
+
+        // Bin classes by day
+        const byDay = Array.from({ length: 7 }, () => []);
+        weekClasses.forEach(cls => {
+            const parsed = parseDate(cls.date);
+            if (!parsed) return;
+            const idx = (parsed.date.getDay() + 6) % 7;
+            if (idx >= 0 && idx < 7) byDay[idx].push(cls);
+        });
+        byDay.forEach(d => d.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || '')));
+
+        const maxClasses = Math.max(...byDay.map(d => d.length), 0);
+
+        for (let ci = 0; ci < maxClasses; ci++) {
+            // Time row
+            const timeValues = [''];
+            byDay.forEach(dayCls => {
+                const cls = dayCls[ci];
+                timeValues.push(cls ? `${cls.startTime} - ${cls.endTime}` : '');
+            });
+            const timeRow = sheet.addRow(timeValues);
+            styleCell(timeRow.getCell(1), { bgColor: EXCEL_COLORS.gray });
+            for (let col = 2; col <= 8; col++) {
+                styleCell(timeRow.getCell(col), {
+                    bgColor: timeValues[col - 1] ? EXCEL_COLORS.timeBg : EXCEL_COLORS.gray,
+                    fontColor: timeValues[col - 1] ? EXCEL_COLORS.timeFont : '000000',
+                    bold: !!timeValues[col - 1],
+                });
+            }
+            timeRow.height = 16;
+
+            // Student rows
+            const maxStudents = Math.max(...byDay.map(d => (d[ci] ? d[ci].students.length : 0)), 1);
+            for (let si = 0; si < maxStudents; si++) {
+                const studentValues = [''];
+                byDay.forEach(dayCls => {
+                    const cls = dayCls[ci];
+                    if (!cls) { studentValues.push(''); return; }
+                    const sid = cls.students[si];
+                    if (!sid) { studentValues.push(''); return; }
+                    const student = appState.students.find(s => s.id === sid);
+                    studentValues.push(student ? `${student.name} (${student.level || '-'})` : '');
+                });
+                const studentRow = sheet.addRow(studentValues);
+                for (let col = 1; col <= 8; col++) {
+                    studentRow.getCell(col).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+                }
+                studentRow.height = 15;
+            }
+        }
+
+        sheet.addRow([]); // blank row between weeks
+    });
+}
 
 // Start the app when DOM is ready
 document.addEventListener('DOMContentLoaded', initializeApp);

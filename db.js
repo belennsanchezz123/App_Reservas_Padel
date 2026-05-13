@@ -43,14 +43,14 @@ const db = {
         try {
             const { data, error } = await supabase
                 .from('monitors')
-                .insert([{
+                .upsert([{
                     id: monitor.id,
                     name: monitor.name,
                     email: monitor.email,
                     phone: monitor.phone,
                     role: monitor.role || 'monitor',
                     created_date: monitor.createdDate || new Date().toISOString()
-                }])
+                }], { onConflict: 'id' })
                 .select()
                 .single();
 
@@ -133,14 +133,14 @@ const db = {
         try {
             const { data, error } = await supabase
                 .from('students')
-                .insert([{
+                .upsert([{
                     id: student.id,
                     name: student.name,
                     email: student.email,
                     phone: student.phone,
                     level: student.level,
                     registered_date: student.registeredDate || new Date().toISOString()
-                }])
+                }], { onConflict: 'id' })
                 .select()
                 .single();
 
@@ -254,21 +254,23 @@ const db = {
 
     async createClass(classData) {
         try {
+            const _dateStr = new Date(classData.date).toLocaleDateString('sv');
             const { data, error } = await supabase
                 .from('classes')
-                .insert([{
+                .upsert([{
                     id: classData.id,
                     day: classData.day,
                     date: classData.date,
-                    start_time: classData.startTime,
-                    end_time: classData.endTime,
+                    start_at: `${_dateStr}T${classData.startTime}:00`,
+                    end_at: `${_dateStr}T${classData.endTime}:00`,
                     students: classData.students,
                     max_capacity: classData.maxCapacity || 4,
                     status: classData.status || 'active',
                     is_completed: classData.isCompleted || false,
                     monitor_id: classData.monitorId,
-                    monitor_name: classData.monitorName
-                }])
+                    monitor_name: classData.monitorName,
+                    comments: classData.comments || null
+                }], { onConflict: 'monitor_id,start_at' })
                 .select()
                 .single();
 
@@ -287,19 +289,22 @@ const db = {
             const dbUpdates = {};
             if (updates.day !== undefined) dbUpdates.day = updates.day;
             if (updates.date !== undefined) dbUpdates.date = updates.date;
-            if (updates.startTime !== undefined) dbUpdates.start_time = updates.startTime;
-            if (updates.endTime !== undefined) dbUpdates.end_time = updates.endTime;
+            if (updates.date !== undefined && updates.startTime !== undefined)
+                dbUpdates.start_at = `${new Date(updates.date).toLocaleDateString('sv')}T${updates.startTime}:00`;
+            if (updates.date !== undefined && updates.endTime !== undefined)
+                dbUpdates.end_at = `${new Date(updates.date).toLocaleDateString('sv')}T${updates.endTime}:00`;
             if (updates.students !== undefined) dbUpdates.students = updates.students;
             if (updates.maxCapacity !== undefined) dbUpdates.max_capacity = updates.maxCapacity;
             if (updates.status !== undefined) dbUpdates.status = updates.status;
             if (updates.isCompleted !== undefined) dbUpdates.is_completed = updates.isCompleted;
             if (updates.monitorId !== undefined) dbUpdates.monitor_id = updates.monitorId;
             if (updates.monitorName !== undefined) dbUpdates.monitor_name = updates.monitorName;
+            if (updates.comments !== undefined) dbUpdates.comments = updates.comments;
+            if (updates.paid !== undefined) dbUpdates.paid = updates.paid;
 
             const { data, error } = await supabase
                 .from('classes')
-                .update(dbUpdates)
-                .eq('id', id)
+                .upsert({ id, ...dbUpdates }, { onConflict: 'monitor_id,start_at' })
                 .select()
                 .single();
 
@@ -334,18 +339,28 @@ const db = {
     // Convertir datos de Supabase (snake_case) a formato app (camelCase)
     convertClassFromDB(dbClass) {
         if (!dbClass) return null;
+        const _startAt = new Date(dbClass.start_at);
+        const _DAYS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
         return {
             id: dbClass.id,
-            day: dbClass.day,
-            date: dbClass.date,
-            startTime: dbClass.start_time,
-            endTime: dbClass.end_time,
+            day: _DAYS_ES[(_startAt.getDay() + 6) % 7],
+            date: _startAt.toLocaleDateString('sv'),
+            startTime: new Date(dbClass.start_at).toLocaleTimeString('es-ES', {
+                hour: '2-digit',
+                minute: '2-digit'
+            }),
+            endTime: new Date(dbClass.end_at).toLocaleTimeString('es-ES', {
+                hour: '2-digit',
+                minute: '2-digit'
+            }),
             students: dbClass.students || [],
             maxCapacity: dbClass.max_capacity,
             status: dbClass.status,
             isCompleted: dbClass.is_completed,
             monitorId: dbClass.monitor_id,
-            monitorName: dbClass.monitor_name
+            monitorName: dbClass.monitor_name,
+            comments: dbClass.comments || '',
+            paid: dbClass.paid || false
         };
     },
 
@@ -373,3 +388,58 @@ const db = {
         };
     }
 };
+// Variable para guardar el usuario actual
+let currentUser = null;
+
+// Función para manejar el inicio de sesión
+async function handleLogin() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const errorMsg = document.getElementById('error-msg');
+
+    try {
+        errorMsg.style.display = 'none';
+        
+        // 1. Intentamos iniciar sesión con Supabase
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email: email,
+            password: password,
+        });
+
+        if (error) throw error;
+
+        // 2. Si no hay error, guardamos el usuario y mostramos la app
+        currentUser = data.user;
+        mostrarApp();
+        alert('¡Bienvenida/o! Sesión iniciada correctamente.');
+
+    } catch (error) {
+        console.error('Error de login:', error);
+        errorMsg.textContent = 'Usuario o contraseña incorrectos';
+        errorMsg.style.display = 'block';
+    }
+}
+
+function mostrarApp() {
+    // Ocultamos el login
+    document.getElementById('login-view').style.display = 'none';
+    // Mostramos la app
+    document.getElementById('app-view').style.display = 'block';
+    
+    // AQUÍ ES IMPORTANTE: Recargar los datos ahora que tenemos permiso
+    // Si tienes funciones como cargarClases() o inicializarApp(), llámalas aquí:
+    if (typeof cargarMonitores === 'function') cargarMonitores();
+    if (typeof cargarClases === 'function') cargarClases(); 
+}
+
+// Opcional: Comprobar si ya había sesión iniciada al recargar la página
+async function checkSession() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+        currentUser = session.user;
+        mostrarApp();
+    }
+}
+
+// Ejecutar comprobación al iniciar
+checkSession();

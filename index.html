@@ -11,7 +11,60 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 
+
 <body>
+
+<div id="login-view" style="
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #f0f2f5;
+">
+    <div style="
+        background: white;
+        padding: 2rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        width: 100%;
+        max-width: 400px;
+        text-align: center;
+    ">
+        <h1 style="color: #2c3e50; margin-bottom: 1.5rem;">🎾 PadelPro</h1>
+        <input type="email" id="email" placeholder="Correo electrónico" style="
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            box-sizing: border-box; 
+        ">
+        <input type="password" id="password" placeholder="Contraseña" style="
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            box-sizing: border-box;
+        ">
+        <button onclick="handleLogin()" style="
+            width: 100%;
+            padding: 12px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        ">Entrar</button>
+        <p id="error-msg" style="color: red; margin-top: 10px; display: none;"></p>
+    </div>
+</div>
+
+
+    <div id="app-view" style="display:none">
+
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-spinner"></div>
@@ -47,6 +100,7 @@
             <div class="logo-section">
                 <div class="logo-icon">🎾</div>
                 <h1 class="app-title">PadelPro Manager</h1>
+                <button class="btn-home" onclick="goHome()" title="Inicio">🏠</button>
             </div>
             <div class="header-actions">
                 <span id="userDisplay" class="user-display"></span>
@@ -64,12 +118,18 @@
         <section class="coordinator-dashboard" id="coordinatorDashboard" style="display: none;">
             <div class="dashboard-header">
                 <h2>👔 Panel de Coordinador</h2>
-                <button class="btn btn-primary" onclick="openAddMonitorModal()">
-                    <span class="btn-icon">+</span>
-                    Nuevo Monitor
-                </button>
+                <div class="dashboard-header-actions">
+                    <button class="btn btn-success" onclick="exportToExcel()" title="Exportar datos a Excel">
+                        <span class="btn-icon">📊</span>
+                        Exportar Excel
+                    </button>
+                    <button class="btn btn-primary" onclick="openAddMonitorModal()">
+                        <span class="btn-icon">+</span>
+                        Nuevo Monitor
+                    </button>
+                </div>
             </div>
-            <div class="monitors-grid" id="monitorsList">
+<div class="monitors-grid" id="monitorsList">
                 <!-- Monitors will be injected here -->
             </div>
         </section>
@@ -84,7 +144,6 @@
                 <span class="btn-icon">+</span>
                 Nuevo Alumno
             </button>
-            <button class="btn btn-primary" id="toggleSidebarBtn" onclick="toggleSidebar()">Ver Alumnos</button>
             <div class="search-box">
                 <input type="text" id="studentSearch" placeholder="Buscar alumno...">
             </div>
@@ -95,8 +154,12 @@
 
         <!-- Calendar Section (Monitor View) -->
         <div id="calendarSectionContainer" style="flex: 1;">
+            <div id="monitorViewHeader" style="display:none;" class="monitor-view-header">
+                <button class="btn btn-secondary" onclick="backToCoordinatorDashboard()">← Volver al panel de coordinador</button>
+                <span id="monitorViewTitle" class="monitor-view-title"></span>
+            </div>
             <section class="calendar-section">
-                <!-- Week Navigation -->
+                <!-- Week Navigation / Month Header -->
                 <div class="week-navigation">
                     <button class="btn btn-secondary" id="prevWeekBtn">
                         <span class="btn-icon">←</span>
@@ -104,7 +167,24 @@
                     </button>
                     <div class="week-info">
                         <h2 id="weekTitle">Semana del 13 - 19 Enero 2026</h2>
-                        <button class="btn btn-sm" id="todayBtn">Hoy</button>
+                        <div class="month-year-selector" id="monthYearSelector" style="display:flex; gap:8px; align-items:center;">
+                            <div class="month-selector" id="monthSelector" style="position:relative;">
+                                <button class="month-selector-button" id="monthSelectorButton" type="button">
+                                    <span id="monthTitle" class="month-title" aria-hidden="true">Febrero</span>
+                                    <span class="month-selector-arrow">▾</span>
+                                </button>
+                                <ul class="month-selector-dropdown" id="monthSelectorDropdown"></ul>
+                            </div>
+                            <div class="year-selector" id="yearSelector">
+                                <button class="year-nav-btn" id="yearPrevBtn" type="button">&#8249;</button>
+                                <span id="yearTitle" class="year-title">2026</span>
+                                <button class="year-nav-btn" id="yearNextBtn" type="button">&#8250;</button>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap;">
+                            <button class="btn btn-sm" id="todayBtn">Hoy</button>
+                            <button class="btn btn-sm" id="copyWeekBtn">Copiar semana →</button>
+                        </div>
                     </div>
                     <button class="btn btn-secondary" id="nextWeekBtn">
                         Semana Siguiente
@@ -123,6 +203,8 @@
                         <span class="btn-icon">👥</span>
                         Ver Alumnos
                     </button>
+                    <button class="btn btn-secondary" onclick="navigateWeek(-1)">← Semana Anterior</button>
+                    <button class="btn btn-secondary" onclick="navigateWeek(1)">Semana Siguiente →</button>
                     <!-- Students modal (opens full-screen modal) -->
                     <div class="modal" id="studentsModal">
                         <div class="modal-content" style="max-width:720px; width:90%;">
@@ -149,15 +231,29 @@
                     </div>
                 </div>
 
-                <!-- Calendar Grid -->
-                <div class="calendar-container">
+                <!-- Calendar Grid (weekly, desktop) -->
+                <div class="calendar-container" id="weekCalendarContainer">
                     <div class="calendar-grid" id="calendarGrid">
-                        <!-- Time column -->
-                        <div class="time-column">
-                            <div class="time-header">Hora</div>
-                            <!-- Time slots will be injected here -->
-                        </div>
-                        <!-- Day columns will be injected here -->
+                        <!-- Time column and day columns will be injected here -->
+                    </div>
+                </div>
+
+                <!-- Month Calendar (mobile) -->
+                <div class="month-calendar-wrapper" id="monthCalendarWrapper">
+                    <div class="month-calendar-grid" id="monthCalendarGrid">
+                        <!-- Monthly day cells injected by JS -->
+                    </div>
+                </div>
+
+                <!-- Selected Day View (mobile) -->
+                <div class="day-classes-panel" id="dayClassesPanel">
+                    <div class="day-classes-header">
+                        <h3 class="day-classes-title" id="dayClassesTitle">Clases del día</h3>
+                        <button class="btn btn-primary btn-sm" id="addClassFromDayViewBtn" type="button">+
+                        </button>
+                    </div>
+                    <div class="day-view-grid" id="dayViewGrid">
+                        <!-- Day time grid injected by JS -->
                     </div>
                 </div>
 
@@ -274,6 +370,10 @@
                     <div class="students-selector" id="studentsSelector">
                         <!-- Search + selected students injected by JS -->
                     </div>
+                </div>
+                <div class="form-group">
+                    <label for="classComments">Comentarios</label>
+                    <textarea id="classComments" rows="3" placeholder="Añade comentarios sobre la clase (opcional)"></textarea>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" id="cancelClassBtn">Cancelar</button>
@@ -437,7 +537,11 @@
     <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
+    </div><!-- end app-view -->
+
     <!-- Scripts: Load order is CRITICAL -->
+    <!-- 0. ExcelJS for Excel export with colors -->
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <!-- 1. First load Supabase library from local node_modules -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
     <!-- 2. Then initialize Supabase client with detailed logging -->
