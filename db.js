@@ -388,58 +388,6 @@ const db = {
         };
     }
 };
-// Variable para guardar el usuario actual
-let currentUser = null;
-
-// Función para manejar el inicio de sesión
-async function handleLogin() {
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-    const errorMsg = document.getElementById('error-msg');
-
-    try {
-        errorMsg.style.display = 'none';
-        
-        // 1. Intentamos iniciar sesión con Supabase
-        const { data, error } = await supabase.auth.signInWithPassword({
-            email: email,
-            password: password,
-        });
-
-        if (error) throw error;
-
-        // 2. Si no hay error, guardamos el usuario y mostramos la app
-        currentUser = data.user;
-        mostrarApp();
-        alert('¡Bienvenida/o! Sesión iniciada correctamente.');
-
-    } catch (error) {
-        console.error('Error de login:', error);
-        errorMsg.textContent = 'Usuario o contraseña incorrectos';
-        errorMsg.style.display = 'block';
-    }
-}
-
-function mostrarApp() {
-    // Ocultamos el login
-    document.getElementById('login-view').style.display = 'none';
-    // Mostramos la app
-    document.getElementById('app-view').style.display = 'block';
-    
-    // AQUÍ ES IMPORTANTE: Recargar los datos ahora que tenemos permiso
-    // Si tienes funciones como cargarClases() o inicializarApp(), llámalas aquí:
-    if (typeof cargarMonitores === 'function') cargarMonitores();
-    if (typeof cargarClases === 'function') cargarClases(); 
-}
-
-// Opcional: Comprobar si ya había sesión iniciada al recargar la página
-async function checkSession() {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-        currentUser = session.user;
-        mostrarApp();
-    }
-}
-
-// Ejecutar comprobación al iniciar
-checkSession();
+// NOTA: la lógica de sesión (login, logout, comprobación de sesión) vive
+// exclusivamente en app.js (handleLogin / initializeApp). No añadir aquí
+// funciones de autenticación duplicadas.

@@ -74,8 +74,8 @@ App_Reservas_Padel/
 | id | uuid |
 | day | text |
 | date | date |
-| start_time | time |
-| end_time | time |
+| start_at | timestamp (fecha + hora de inicio) |
+| end_at | timestamp (fecha + hora de fin) |
 | students | uuid[] |
 | max_capacity | int (por defecto 4) |
 | status | text |
@@ -83,6 +83,9 @@ App_Reservas_Padel/
 | monitor_id | uuid |
 | monitor_name | text |
 | comments | text |
+| paid | boolean (pago de la clase al monitor, lo marca el coordinador) |
+
+En la app (`db.js.convertClassFromDB`) `start_at`/`end_at` se convierten a `startTime`/`endTime` (HH:MM) y `date` (YYYY-MM-DD).
 
 ## Roles de usuario
 

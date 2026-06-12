@@ -116,6 +116,16 @@ function generateId() {
     return '_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
 }
 
+// Escapa texto para interpolarlo de forma segura en HTML (contenido o atributos)
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 function formatDate(date) {
     const d = new Date(date);
     const day = String(d.getDate()).padStart(2, '0');
@@ -1853,7 +1863,7 @@ function renderMonitorsList() {
                     </div>
                     <table class="monitor-month-table">
                         <thead>
-                            <tr><th>Mes</th><th>Clases</th><th>Horas</th></tr>
+                            <tr><th>Mes</th><th>Clases</th><th>Horas</th><th>Pagos</th></tr>
                         </thead>
                         <tbody id="month-tbody-${monitor.id}">${buildMonthRows(monitor.id, currentYear)}</tbody>
                     </table>
@@ -1876,10 +1886,52 @@ function toggleMonitorDetails(btn) {
     btn.textContent = open ? 'Ocultar detalles ▲' : 'Ver detalles ▼';
 }
 
+function getMonthClasses(monitorId, year, month) {
+    return appState.classes.filter(c => {
+        if (c.monitorId !== monitorId) return false;
+        const [y, mo] = (c.date || '').split('-').map(Number);
+        return y === year && (mo - 1) === month;
+    });
+}
+
+function getMonthPayStatus(monitorId, year, month) {
+    const classes = getMonthClasses(monitorId, year, month);
+    const paid = classes.filter(c => c.paid).length;
+    const total = classes.length;
+    if (total === 0) return { cls: 'none', label: '—', paid, total };
+    if (paid === total) return { cls: 'paid', label: 'Pagado', paid, total };
+    if (paid === 0) return { cls: 'pending', label: 'Pendiente', paid, total };
+    return { cls: 'partial', label: `${paid}/${total} pagadas`, paid, total };
+}
+
+function renderPayBadge(monitorId, year, month) {
+    const s = getMonthPayStatus(monitorId, year, month);
+    return `<span class="pay-badge ${s.cls}" id="paybadge-${monitorId}-${year}-${month}">${s.label}</span>`;
+}
+
+function refreshMonthPayBadge(monitorId, year, month) {
+    const el = document.getElementById(`paybadge-${monitorId}-${year}-${month}`);
+    if (el) {
+        const s = getMonthPayStatus(monitorId, year, month);
+        el.className = `pay-badge ${s.cls}`;
+        el.textContent = s.label;
+    }
+    refreshYearPayTotal(monitorId, year);
+}
+
+function refreshYearPayTotal(monitorId, year) {
+    const el = document.getElementById(`paytotal-${monitorId}-${year}`);
+    if (!el) return;
+    const yearClasses = appState.classes.filter(c =>
+        c.monitorId === monitorId && Number((c.date || '').split('-')[0]) === year);
+    const paid = yearClasses.filter(c => c.paid).length;
+    el.textContent = yearClasses.length ? `${paid}/${yearClasses.length} pagadas` : '—';
+}
+
 function buildMonthRows(monitorId, year) {
     const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
     const classes = appState.classes.filter(c => c.monitorId === monitorId);
-    return monthNames.map((name, m) => {
+    const monthRows = monthNames.map((name, m) => {
         const mClasses = classes.filter(cls => {
             const [y, mo] = (cls.date || '').split('-').map(Number);
             return y === year && (mo - 1) === m;
@@ -1893,35 +1945,34 @@ function buildMonthRows(monitorId, year) {
         const detailRows = sorted.map(cls => {
             const h = getClassDurationHours(cls);
             const [, , dd] = (cls.date || '').split('-');
+            const studentNames = (cls.students || [])
+                .map(id => { const s = getStudentById(id); return s ? s.name : null; })
+                .filter(Boolean);
             const studentCount = cls.students ? cls.students.length : 0;
+            const titleAttr = studentNames.length ? ` title="${escapeHtml(studentNames.join(', '))}"` : '';
             return `<tr class="month-class-detail-row">
-                <td style="padding-left:1.5rem;font-size:0.78rem;color:var(--gray-600);">
-                    ${name} ${parseInt(dd,10)} · ${cls.startTime}–${cls.endTime} · ${studentCount} alumnos
+                <td class="month-class-info"${titleAttr}>
+                    ${name} ${parseInt(dd,10)} · ${cls.startTime}–${cls.endTime} · ${studentCount} ${studentCount === 1 ? 'alumno' : 'alumnos'}
                 </td>
-                <td style="font-size:0.78rem;color:var(--gray-600);text-align:center;">${h.toFixed(1)}</td>
+                <td class="month-class-hours">${h.toFixed(1)}</td>
                 <td style="text-align:center;">
                     <input type="checkbox" class="paid-checkbox" data-class-id="${cls.id}"
                         ${cls.paid ? 'checked' : ''}
-                        onchange="toggleClassPaid('${cls.id}', this.checked)"
-                        style="width:16px;height:16px;cursor:pointer;accent-color:var(--primary-green);">
+                        onchange="toggleClassPaid('${cls.id}', this.checked)">
                 </td>
             </tr>`;
         }).join('');
 
         const detailHtml = empty ? '' : `
             <tr class="month-detail-container" style="display:none;">
-                <td colspan="3" style="padding:0;">
-                    <table style="width:100%;border-collapse:collapse;">
-                        <tr>
-                            <td colspan="3" style="padding:0.3rem 1.5rem;">
-                                <button onclick="payAllMonthClasses(this, '${monitorId}', ${year}, ${m})"
-                                    style="font-size:0.75rem;padding:3px 10px;background:var(--primary-green);color:white;border:none;border-radius:4px;cursor:pointer;">
-                                    Pagar todas las clases
-                                </button>
-                            </td>
-                        </tr>
-                        ${detailRows}
-                    </table>
+                <td colspan="4" style="padding:0;">
+                    <div class="month-detail-toolbar">
+                        <span class="toolbar-label">Clases de ${name} ${year}</span>
+                        <button class="btn-pay-month" onclick="payAllMonthClasses(this, '${monitorId}', ${year}, ${m})">
+                            Marcar mes pagado
+                        </button>
+                    </div>
+                    <table class="month-detail-table">${detailRows}</table>
                 </td>
             </tr>`;
 
@@ -1930,8 +1981,21 @@ function buildMonthRows(monitorId, year) {
             <td>${name}${empty ? '' : ' <span class="month-expand-icon">▸</span>'}</td>
             <td>${mClasses.length}</td>
             <td>${mHours.toFixed(1)}</td>
+            <td>${renderPayBadge(monitorId, year, m)}</td>
         </tr>${detailHtml}`;
     }).join('');
+
+    const yearClasses = classes.filter(c => Number((c.date || '').split('-')[0]) === year);
+    const totalHours = yearClasses.reduce((sum, cls) => sum + getClassDurationHours(cls), 0);
+    const totalPaid = yearClasses.filter(c => c.paid).length;
+    const totalsRow = `<tr class="month-total-row">
+        <td>Total ${year}</td>
+        <td>${yearClasses.length}</td>
+        <td>${totalHours.toFixed(1)}</td>
+        <td><span id="paytotal-${monitorId}-${year}">${yearClasses.length ? `${totalPaid}/${yearClasses.length} pagadas` : '—'}</span></td>
+    </tr>`;
+
+    return monthRows + totalsRow;
 }
 
 function toggleMonthDetail(row) {
@@ -1948,15 +2012,13 @@ async function toggleClassPaid(classId, newPaid) {
     if (!cls) return;
     cls.paid = newPaid;
     await updateClass(classId, { paid: newPaid }, true);
+    const [y, mo] = (cls.date || '').split('-').map(Number);
+    if (y && mo) refreshMonthPayBadge(cls.monitorId, y, mo - 1);
 }
 
 async function payAllMonthClasses(btn, monitorId, year, month) {
-    const classes = appState.classes.filter(c => {
-        if (c.monitorId !== monitorId) return false;
-        const [y, mo] = (c.date || '').split('-').map(Number);
-        return y === year && (mo - 1) === month;
-    });
-    await Promise.all(classes.map(cls => {
+    const pending = getMonthClasses(monitorId, year, month).filter(c => !c.paid);
+    await Promise.all(pending.map(cls => {
         cls.paid = true;
         return updateClass(cls.id, { paid: true }, true);
     }));
@@ -1965,6 +2027,8 @@ async function payAllMonthClasses(btn, monitorId, year, month) {
     if (detailRow) {
         detailRow.querySelectorAll('.paid-checkbox').forEach(cb => { cb.checked = true; });
     }
+    refreshMonthPayBadge(monitorId, year, month);
+    if (pending.length > 0) showToast('Mes marcado como pagado');
 }
 
 function changeMonitorYear(btn, monitorId, delta) {
@@ -2936,6 +3000,9 @@ async function initializeApp() {
                 const { data, error } = await supabase.auth.getSession();
                 if (error) {
                     console.warn('No se pudo obtener la sesión de Supabase al iniciar:', error);
+                    // Token caducado/revocado guardado en el navegador: limpiar el
+                    // estado local para que no reintente el refresh en cada recarga.
+                    await supabase.auth.signOut().catch(() => {});
                 }
 
                 const hasSession = data && data.session;
@@ -2951,6 +3018,7 @@ async function initializeApp() {
                 }
             } catch (sessionError) {
                 console.warn('Error comprobando sesión de Supabase al iniciar:', sessionError);
+                await supabase.auth.signOut().catch(() => {});
                 if (loginView) loginView.style.display = 'flex';
                 hideLoginScreen();
                 hideMainApp();
@@ -3014,14 +3082,31 @@ function styleCell(cell, { bgColor, fontColor, bold = false, fontSize = 11, ital
     cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
 }
 
+// ExcelJS pesa ~1 MB, así que no se incluye en index.html: se carga bajo
+// demanda la primera vez que se exporta, para no penalizar el arranque.
+function ensureExcelJS() {
+    if (typeof ExcelJS !== 'undefined') return Promise.resolve(true);
+    return new Promise(resolve => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+        script.onload = () => resolve(true);
+        script.onerror = () => resolve(false);
+        document.head.appendChild(script);
+    });
+}
+
 async function exportToExcel() {
-    if (typeof ExcelJS === 'undefined') {
-        showToast('La librería Excel no está cargada. Recarga la página.', 'error');
-        return;
-    }
     const monitors = appState.monitors;
     if (monitors.length === 0) {
         showToast('No hay monitores para exportar', 'warning');
+        return;
+    }
+
+    showLoading('Preparando exportación...');
+    const excelReady = await ensureExcelJS();
+    hideLoading();
+    if (!excelReady) {
+        showToast('No se pudo cargar la librería de Excel. Comprueba tu conexión.', 'error');
         return;
     }
 
