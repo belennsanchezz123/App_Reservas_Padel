@@ -2589,6 +2589,9 @@ async function handleMonitorLogin() {
 // ==========================================
 
 function showLoginScreen() {
+    // #app-view debe estar visible para que #loginScreen (que vive dentro) se muestre
+    const appView = document.getElementById('app-view');
+    if (appView) appView.style.display = 'block';
     const loginScreen = document.getElementById('loginScreen');
     if (loginScreen) loginScreen.style.display = 'flex';
 }
@@ -2599,6 +2602,8 @@ function hideLoginScreen() {
 }
 
 function showMainApp() {
+    const appView = document.getElementById('app-view');
+    if (appView) appView.style.display = 'block';
     const mainContainer = document.querySelector('.main-container');
     const header = document.querySelector('.header');
     if (mainContainer) mainContainer.style.display = 'flex';
