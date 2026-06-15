@@ -5,7 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestión de Clases de Pádel</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
+    <link rel="stylesheet" href="styles.css?v=16">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -46,42 +47,16 @@
         <p class="loading-text">Cargando datos...</p>
     </div>
 
-    <!-- Login Screen -->
-    <div class="login-screen" id="loginScreen">
-        <div class="login-container">
-            <div class="login-header">
-                <div class="login-logo">🎾</div>
-                <h1>PadelPro Manager</h1>
-                <p>Selecciona tu rol para continuar</p>
-            </div>
-            <div class="login-roles">
-                <div class="role-card" onclick="login('coordinator')">
-                    <div class="role-icon">👔</div>
-                    <h2>Coordinador</h2>
-                    <p>Gestiona monitores y visualiza todas las clases</p>
-                </div>
-                <div class="role-card" onclick="showMonitorLogin()">
-                    <div class="role-icon">🎾</div>
-                    <h2>Monitor</h2>
-                    <p>Gestiona tus propias clases y alumnos</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Header -->
     <header class="header">
         <div class="header-content">
             <div class="logo-section">
                 <div class="logo-icon">🎾</div>
                 <h1 class="app-title">PadelPro Manager</h1>
-                <button class="btn-home" onclick="goHome()" title="Inicio">🏠</button>
+                <button class="btn-home" onclick="logout()" title="Cerrar sesión">🏠</button>
             </div>
             <div class="header-actions">
                 <span id="userDisplay" class="user-display"></span>
-                <button class="btn btn-outline-light btn-sm" onclick="logout()">
-                    Cerrar sesión
-                </button>
             </div>
         </div>
     </header>
@@ -105,6 +80,26 @@
             </div>
 <div class="monitors-grid" id="monitorsList">
                 <!-- Monitors will be injected here -->
+            </div>
+        </section>
+
+        <!-- Recepción Dashboard -->
+        <section id="recepcionDashboard" class="recepcion-dashboard" style="display: none;">
+            <div class="recepcion-inner">
+                <div class="recepcion-header">
+                    <div class="recepcion-title-group">
+                        <span class="recepcion-icon">🏢</span>
+                        <div>
+                            <h2 class="recepcion-title">Panel de Recepción</h2>
+                            <p class="recepcion-subtitle">Gestión de pagos de alumnos</p>
+                        </div>
+                    </div>
+                    <div class="recepcion-search-wrap">
+                        <span class="recepcion-search-icon">🔍</span>
+                        <input type="text" id="recepcionStudentSearch" class="recepcion-search-input" placeholder="Buscar alumno..." oninput="renderRecepcionStudentsList()">
+                    </div>
+                </div>
+                <div id="recepcionStudentsList" class="recepcion-grid"></div>
             </div>
         </section>
 
@@ -349,6 +344,12 @@
                     <label for="classComments">Comentarios</label>
                     <textarea id="classComments" rows="3" placeholder="Añade comentarios sobre la clase (opcional)"></textarea>
                 </div>
+                <div class="form-group recurring-section" id="recurringSection">
+                    <label class="recurring-toggle-label">
+                        <input type="checkbox" id="recurringEnabled">
+                        <span class="recurring-toggle-text">Clase recurrente (se repite cada semana)</span>
+                    </label>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" id="cancelClassBtn">Cancelar</button>
                     <button type="submit" class="btn btn-primary">Guardar Clase</button>
@@ -409,28 +410,61 @@
     </div>
 
     <!-- Modal: Monitor Login (Select Monitor) -->
-    <div class="modal" id="monitorLoginModal">
-        <div class="modal-content">
+    <!-- Modal: Ficha de Alumno con Pagos -->
+    <div class="modal" id="studentProfileModal">
+        <div class="modal-content modal-wide">
             <div class="modal-header">
-                <h3>Ingresar como Monitor</h3>
-                <button class="btn-close" onclick="closeMonitorLoginModal()">✕</button>
+                <div>
+                    <h3 id="profileStudentName"></h3>
+                    <div id="profileStudentMeta" class="profile-meta"></div>
+                </div>
+                <button class="btn-close" onclick="closeModal('studentProfileModal')">✕</button>
             </div>
-            <div style="padding: var(--spacing-lg);">
-                <div class="form-group">
-                    <label>Selecciona tu nombre o crea uno nuevo:</label>
-                    <select id="monitorSelect"
-                        style="width: 100%; padding: var(--spacing-sm); margin-bottom: var(--spacing-md); border: 2px solid var(--gray-200); border-radius: var(--radius-md);">
-                        <option value="">--- Nuevo Monitor ---</option>
-                    </select>
+            <div class="profile-body">
+                <div class="profile-summary-bar" id="profileSummaryBar"></div>
+                <div class="profile-add-section">
+                    <div class="profile-add-btns">
+                        <button class="btn btn-primary btn-sm" onclick="showAddPaymentForm('monthly')">+ Cuota mensual</button>
+                        <button class="btn btn-secondary btn-sm" onclick="showAddPaymentForm('class')">+ Clase suelta</button>
+                    </div>
+                    <div id="addPaymentFormContainer" class="add-payment-form-box" style="display:none">
+                        <div class="form-row">
+                            <div class="form-group" id="paymentPeriodGroup">
+                                <label>Mes</label>
+                                <input type="month" id="paymentPeriod">
+                            </div>
+                            <div class="form-group" id="paymentClassGroup" style="display:none">
+                                <label>Clase</label>
+                                <select id="paymentClassSelect" onchange="onClassSelectChange()"><option value="">Seleccionar clase...</option></select>
+                                <div id="paymentClassManualGroup" style="display:none; margin-top:0.4rem;">
+                                    <input type="text" id="paymentClassManual" placeholder="Ej: Lunes 2 junio · 10:00 (clase extra)">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Importe (€)</label>
+                                <input type="number" id="paymentAmount" min="0" step="0.5" placeholder="0.00">
+                            </div>
+                            <div class="form-group">
+                                <label>Método</label>
+                                <select id="paymentMethod">
+                                    <option value="">—</option>
+                                    <option value="efectivo">Efectivo</option>
+                                    <option value="bizum">Bizum</option>
+                                    <option value="transferencia">Transferencia</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Notas</label>
+                            <input type="text" id="paymentNotes" placeholder="Opcional">
+                        </div>
+                        <div class="add-payment-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="hideAddPaymentForm()">Cancelar</button>
+                            <button class="btn btn-primary btn-sm" onclick="submitAddPayment()">Guardar pago</button>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group" id="newMonitorNameGroup">
-                    <label for="newMonitorName">Nombre del nuevo monitor:</label>
-                    <input type="text" id="newMonitorName" placeholder="Tu nombre">
-                </div>
-                <div class="modal-actions">
-                    <button class="btn btn-secondary" onclick="closeMonitorLoginModal()">Cancelar</button>
-                    <button class="btn btn-primary" onclick="handleMonitorLogin()">Iniciar Sesión</button>
-                </div>
+                <div id="profilePaymentsList" class="profile-payments-list"></div>
             </div>
         </div>
     </div>
@@ -487,6 +521,42 @@
         </div>
     </div>
 
+    <!-- Modal: Confirmar eliminación de clase -->
+    <div class="modal" id="deleteClassModal">
+        <div class="modal-content modal-compact">
+            <div class="modal-header">
+                <h3>Eliminar clase</h3>
+                <button class="btn-close" onclick="closeModal('deleteClassModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="deleteClassModalDesc"></p>
+            </div>
+            <div class="modal-actions" id="deleteClassModalActions">
+                <button class="btn btn-secondary" onclick="closeModal('deleteClassModal')">Cancelar</button>
+                <button class="btn btn-danger" id="deleteSingleClassConfirmBtn">Solo esta clase</button>
+                <button class="btn btn-danger" id="deleteRecurringGroupConfirmBtn" style="display:none;">Todas las recurrentes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Confirmar baja de alumno -->
+    <div class="modal" id="deactivateStudentModal">
+        <div class="modal-content modal-compact">
+            <div class="modal-header">
+                <h3>Dar de baja</h3>
+                <button class="btn-close" onclick="closeModal('deactivateStudentModal')">✕</button>
+            </div>
+            <div class="modal-body" style="text-align:center; padding: var(--spacing-xl) var(--spacing-lg) var(--spacing-md);">
+                <p id="deactivateStudentModalDesc"></p>
+                <p style="font-size:var(--font-size-sm); color:var(--gray-500); margin-top:var(--spacing-sm);">El alumno quedará inactivo pero se conservarán todos sus datos y pagos.</p>
+            </div>
+            <div class="modal-actions" style="flex-direction:column; align-items:stretch; gap:var(--spacing-sm);">
+                <button class="btn btn-baja" id="deactivateStudentConfirmBtn">Confirmar baja</button>
+                <button class="btn btn-secondary" onclick="closeModal('deactivateStudentModal')">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Confirm Changes -->
     <div class="modal" id="confirmChangesModal">
         <div class="modal-content">
@@ -518,11 +588,11 @@
     <!-- 1. First load Supabase library from local node_modules -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
     <!-- 2. Then initialize Supabase client with detailed logging -->
-    <script src="supabase-init.js?v=7"></script>
+    <script src="supabase-init.js?v=16"></script>
     <!-- 3. Then load database layer -->
-    <script src="db.js?v=7"></script>
+    <script src="db.js?v=16"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=7"></script>
+    <script src="app.js?v=16"></script>
 </body>
 
 </html>

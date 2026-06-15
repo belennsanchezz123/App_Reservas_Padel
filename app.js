@@ -9,7 +9,11 @@ const appState = {
     currentMonthDate: null,
     selectedDayDate: null,
     selectedClass: null,
+    classToDelete: null,
     editingStudent: null,
+    viewingStudentId: null,
+    studentPayments: [],
+    addPaymentType: null,
     monitors: [],
     currentUser: null,
     viewingMonitorId: null,
@@ -70,10 +74,7 @@ async function handleLogin() {
     try {
         errorMsg.style.display = 'none';
 
-        const { data, error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-        });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
         if (error) {
             console.error('Error de login Supabase:', error);
@@ -82,21 +83,38 @@ async function handleLogin() {
             return;
         }
 
-        const loginView = document.getElementById('login-view');
-        if (loginView) {
-            loginView.style.display = 'none';
+        // Fetch the monitor row linked to this auth user
+        const { data: monitorRow, error: monitorError } = await supabase
+            .from('monitors')
+            .select('*')
+            .eq('auth_user_id', data.user.id)
+            .single();
+
+        if (monitorError || !monitorRow) {
+            console.error('No se encontró fila en monitors para este usuario:', monitorError);
+            errorMsg.textContent = 'Usuario no autorizado. Contacta con el administrador.';
+            errorMsg.style.display = 'block';
+            await supabase.auth.signOut();
+            return;
         }
 
-        console.log('✅ Login Supabase correcto', data);
+        appState.currentUser = {
+            id: monitorRow.id,
+            name: monitorRow.name,
+            permissions: monitorRow.permissions || [],
+        };
 
-		// Una vez autenticado correctamente en Supabase, inicializamos la app
-		// para cargar datos y mostrar la pantalla de rol (coordinador/monitor)
-		// o la vista principal si ya había un usuario guardado.
-		try {
-			await initializeApp();
-		} catch (initError) {
-			console.error('Error al inicializar la app tras el login:', initError);
-		}
+        const loginView = document.getElementById('login-view');
+        if (loginView) loginView.style.display = 'none';
+
+        console.log('✅ Login correcto como:', appState.currentUser.name, appState.currentUser.permissions);
+
+        try {
+            await loadAllData();
+        } catch (loadError) {
+            console.warn('Error cargando datos tras login:', loadError);
+        }
+        showMainApp();
     } catch (e) {
         console.error('Excepción en handleLogin:', e);
         errorMsg.textContent = 'Error inesperado al iniciar sesión.';
@@ -163,6 +181,13 @@ function getDateForDay(weekStart, dayIndex) {
 
 function formatTime(time) {
     return time.padStart(5, '0');
+}
+
+function formatPeriod(period) {
+    if (!period) return '';
+    const [year, month] = period.split('-');
+    const months = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    return `${months[parseInt(month, 10) - 1]} ${year}`;
 }
 
 function addMinutesToTime(time, minutesToAdd) {
@@ -243,49 +268,12 @@ function toggleSidebar() {
 // AUTHENTICATION & USER MANAGEMENT
 // ==========================================
 
-async function login(role, monitorId = null, monitorName = null) {
-    if (role === 'coordinator') {
-        appState.currentUser = {
-            id: 'coordinator',
-            name: 'Coordinador',
-            role: 'coordinator',
-        };
-    } else if (role === 'monitor') {
-        if (monitorId) {
-            const monitor = getMonitorById(monitorId);
-            if (monitor) {
-                appState.currentUser = {
-                    id: monitor.id,
-                    name: monitor.name,
-                    role: 'monitor',
-                };
-            }
-        } else if (monitorName) {
-            try {
-                const newMonitor = await addMonitor(monitorName, '', '');
-                appState.currentUser = {
-                    id: newMonitor.id,
-                    name: newMonitor.name,
-                    role: 'monitor',
-                };
-            } catch (error) {
-                showToast('Error al crear monitor', 'error');
-                return;
-            }
-        }
-    }
-
-    localStorage.setItem('padelApp_currentUser', JSON.stringify(appState.currentUser));
-    hideLoginScreen();
-    showMainApp();
-}
 
 function logout() {
     appState.currentUser = null;
     localStorage.removeItem('padelApp_currentUser');
     localStorage.removeItem('padelApp_dbLogin');
 
-    // Cerrar sesión también en Supabase Auth si está disponible
     if (typeof supabase !== 'undefined' && supabase) {
         supabase.auth.signOut().catch(err => {
             console.warn('Error al cerrar sesión en Supabase:', err);
@@ -293,13 +281,8 @@ function logout() {
     }
 
     const loginView = document.getElementById('login-view');
-    if (loginView) {
-        loginView.style.display = 'flex';
-    }
+    if (loginView) loginView.style.display = 'flex';
 
-    // Al cerrar sesión, ocultamos la pantalla de rol y la app principal;
-    // el usuario deberá autenticarse de nuevo en Supabase para continuar.
-    hideLoginScreen();
     hideMainApp();
 }
 
@@ -308,11 +291,15 @@ function getCurrentUser() {
 }
 
 function isCoordinator() {
-    return appState.currentUser && appState.currentUser.role === 'coordinator';
+    return (appState.currentUser?.permissions || []).includes('coordinador');
 }
 
 function isMonitor() {
-    return appState.currentUser && appState.currentUser.role === 'monitor';
+    return (appState.currentUser?.permissions || []).includes('monitor');
+}
+
+function isRecepcion() {
+    return (appState.currentUser?.permissions || []).includes('recepcion');
 }
 
 // ==========================================
@@ -657,10 +644,12 @@ function getClassById(classId) {
 function getClassesForWeek(weekStart) {
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekEnd.getDate() + 7);
+    const weekStartStr = weekStart.toLocaleDateString('sv');
+    const weekEndStr = weekEnd.toLocaleDateString('sv');
 
     let classes = appState.classes.filter(cls => {
-        const classDate = new Date(cls.date);
-        return classDate >= weekStart && classDate < weekEnd;
+        const dateStr = (cls.date || '').substring(0, 10);
+        return dateStr >= weekStartStr && dateStr < weekEndStr;
     });
 
     if (isMonitor()) {
@@ -1430,7 +1419,7 @@ function renderStudentsList() {
         return;
     }
 
-    appState.students.forEach(student => {
+    appState.students.filter(s => s.active !== false).forEach(student => {
         const classCount = getStudentClassCount(student.id);
         const card = document.createElement('div');
         card.className = 'student-card';
@@ -1443,6 +1432,7 @@ function renderStudentsList() {
             <div class="student-card-header">
                 <h4>${student.name} ${levelDisplay}</h4>
                 <div class="student-card-actions">
+                    ${(isCoordinator() || isRecepcion()) ? `<button class="btn-icon-sm" onclick="showStudentProfile('${student.id}')" title="Ver ficha y pagos">📋</button>` : ''}
                     <button class="btn-icon-sm" onclick="openEditStudentModal('${student.id}')" title="Editar">✏️</button>
                     <button class="btn-icon-sm btn-danger-sm" onclick="confirmDeleteStudent('${student.id}')" title="Eliminar">🗑️</button>
                 </div>
@@ -1464,6 +1454,322 @@ function confirmDeleteStudent(studentId) {
     deleteStudent(studentId);
 }
 
+// ==========================================
+// FICHA DE ALUMNO — PAGOS
+// ==========================================
+
+async function showStudentProfile(studentId) {
+    if (!isCoordinator() && !isRecepcion()) return;
+    const student = getStudentById(studentId);
+    if (!student) return;
+
+    appState.viewingStudentId = studentId;
+    appState.studentPayments = [];
+
+    document.getElementById('profileStudentName').textContent = student.name;
+    const parts = [
+        student.level !== null && student.level !== undefined ? `Nivel ${student.level}` : null,
+        student.email || null,
+        student.phone || null,
+    ].filter(Boolean);
+    document.getElementById('profileStudentMeta').textContent = parts.join(' · ');
+
+    hideAddPaymentForm();
+    document.getElementById('profilePaymentsList').innerHTML = '<p class="profile-loading">Cargando pagos...</p>';
+    document.getElementById('profileSummaryBar').innerHTML = '';
+
+    openModal('studentProfileModal');
+
+    try {
+        const data = await db.getPaymentsByStudent(studentId);
+        appState.studentPayments = data.map(p => db.convertPaymentFromDB(p));
+    } catch (e) {
+        console.error('Error loading payments:', e);
+        appState.studentPayments = [];
+    }
+    renderStudentPayments();
+    // Si el usuario abrió el formulario de clase suelta antes de que los pagos
+    // terminaran de cargar, refrescar el desplegable con los datos ya cargados.
+    if (appState.addPaymentType === 'class') {
+        showAddPaymentForm('class');
+    }
+}
+
+function renderStudentPayments() {
+    const payments = appState.studentPayments;
+    const studentId = appState.viewingStudentId;
+
+    const totalPaid = payments.filter(p => p.paidDate).reduce((s, p) => s + (p.amount || 0), 0);
+    const totalPending = payments.filter(p => !p.paidDate).reduce((s, p) => s + (p.amount || 0), 0);
+
+    // Clases del alumno sin ningún tipo de cobertura (ni individual ni por cuota mensual)
+    const paidClassIds = new Set(payments.filter(p => p.classId).map(p => p.classId));
+    const paidMonths = new Set(payments.filter(p => p.period && !p.classId).map(p => p.period));
+    const unpaidClasses = appState.classes.filter(c =>
+        Array.isArray(c.students) &&
+        c.students.includes(studentId) &&
+        !paidClassIds.has(c.id) &&
+        !paidMonths.has(c.date.substring(0, 7))
+    );
+
+    document.getElementById('profileSummaryBar').innerHTML = `
+        <div class="profile-stat">
+            <span class="profile-stat-label">Cobrado</span>
+            <span class="profile-stat-value profile-stat-paid">€${totalPaid.toFixed(2)}</span>
+        </div>
+        <div class="profile-stat">
+            <span class="profile-stat-label">Pendiente</span>
+            <span class="profile-stat-value profile-stat-pending">€${totalPending.toFixed(2)}</span>
+        </div>
+        <div class="profile-stat">
+            <span class="profile-stat-label">Clases sin pagar</span>
+            <span class="profile-stat-value ${unpaidClasses.length > 0 ? 'profile-stat-pending' : ''}">${unpaidClasses.length}</span>
+        </div>
+        <div class="profile-stat">
+            <span class="profile-stat-label">Registros</span>
+            <span class="profile-stat-value">${payments.length}</span>
+        </div>
+    `;
+
+    const container = document.getElementById('profilePaymentsList');
+    if (payments.length === 0) {
+        container.innerHTML = '<p class="profile-empty">No hay pagos registrados. Usa los botones de arriba para añadir.</p>';
+        return;
+    }
+
+    container.innerHTML = payments.map(p => {
+        const isClass = !!p.classId;
+        const isPaid = !!p.paidDate;
+
+        let description = '';
+        if (isClass) {
+            const cls = getClassById(p.classId);
+            description = cls ? `${cls.day} ${cls.date} · ${cls.startTime}` : 'Clase';
+        } else {
+            description = p.period ? formatPeriod(p.period) : 'Cuota';
+        }
+
+        const method = p.method ? `<span class="payment-method">${escapeHtml(p.method)}</span>` : '';
+        const notes = p.notes ? `<div class="payment-notes">${escapeHtml(p.notes)}</div>` : '';
+        const amount = p.amount !== null ? `€${parseFloat(p.amount).toFixed(2)}` : '—';
+        const paidLabel = isPaid ? `Pagado ${escapeHtml(p.paidDate)}` : 'Pendiente';
+        const icon = isClass ? '📚' : '📅';
+
+        return `
+            <div class="payment-row">
+                <div class="payment-row-info">
+                    <div class="payment-desc">${icon} <strong>${escapeHtml(description)}</strong> ${method}</div>
+                    ${notes}
+                </div>
+                <div class="payment-row-right">
+                    <span class="payment-amount">${amount}</span>
+                    <button class="pay-badge ${isPaid ? 'paid' : 'none'}" onclick="togglePaymentPaid('${p.id}')">
+                        ${paidLabel}
+                    </button>
+                    <button class="btn-icon-sm btn-danger-sm" onclick="deleteStudentPayment('${p.id}')" title="Eliminar">🗑️</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function showAddPaymentForm(type) {
+    appState.addPaymentType = type;
+
+    document.getElementById('paymentAmount').value = '';
+    document.getElementById('paymentMethod').value = '';
+    document.getElementById('paymentNotes').value = '';
+
+    const periodGroup = document.getElementById('paymentPeriodGroup');
+    const classGroup = document.getElementById('paymentClassGroup');
+
+    if (type === 'monthly') {
+        periodGroup.style.display = '';
+        classGroup.style.display = 'none';
+        const now = new Date();
+        document.getElementById('paymentPeriod').value =
+            `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    } else {
+        periodGroup.style.display = 'none';
+        classGroup.style.display = '';
+        const select = document.getElementById('paymentClassSelect');
+        select.innerHTML = '<option value="">Seleccionar clase...</option>';
+        const manualGroup = document.getElementById('paymentClassManualGroup');
+        if (manualGroup) { manualGroup.style.display = 'none'; }
+        const studentId = appState.viewingStudentId;
+
+        // Clases con pago individual registrado
+        const paidClassIds = new Set(
+            appState.studentPayments.filter(p => p.classId).map(p => p.classId)
+        );
+        // Meses cubiertos por cuota mensual
+        const paidMonths = new Set(
+            appState.studentPayments.filter(p => p.period && !p.classId).map(p => p.period)
+        );
+
+        const studentClasses = appState.classes
+            .filter(c => Array.isArray(c.students) && c.students.includes(studentId))
+            .sort((a, b) => b.date.localeCompare(a.date));
+
+        // Clasificar cada clase
+        const pending = [];
+        const coveredByQuota = [];
+        const paidIndividually = [];
+
+        studentClasses.forEach(cls => {
+            const month = cls.date.substring(0, 7);
+            if (paidClassIds.has(cls.id)) {
+                paidIndividually.push(cls);
+            } else if (paidMonths.has(month)) {
+                coveredByQuota.push({ cls, month });
+            } else {
+                pending.push(cls);
+            }
+        });
+
+        if (pending.length > 0) {
+            const grp = document.createElement('optgroup');
+            grp.label = `Pendientes de pago (${pending.length})`;
+            pending.forEach(cls => {
+                const opt = document.createElement('option');
+                opt.value = cls.id;
+                opt.textContent = `${cls.date} · ${cls.startTime}–${cls.endTime} · ${cls.day}`;
+                grp.appendChild(opt);
+            });
+            select.appendChild(grp);
+        }
+
+        if (coveredByQuota.length > 0) {
+            const grp = document.createElement('optgroup');
+            grp.label = `Cubiertas por cuota mensual (${coveredByQuota.length})`;
+            coveredByQuota.forEach(({ cls, month }) => {
+                const opt = document.createElement('option');
+                opt.value = cls.id;
+                opt.disabled = true;
+                opt.textContent = `📅 ${cls.date} · ${cls.startTime} · ${cls.day} (cuota ${formatPeriod(month)})`;
+                grp.appendChild(opt);
+            });
+            select.appendChild(grp);
+        }
+
+        if (paidIndividually.length > 0) {
+            const grp = document.createElement('optgroup');
+            grp.label = `Ya pagadas individualmente (${paidIndividually.length})`;
+            paidIndividually.forEach(cls => {
+                const opt = document.createElement('option');
+                opt.value = cls.id;
+                opt.disabled = true;
+                opt.textContent = `✅ ${cls.date} · ${cls.startTime} · ${cls.day}`;
+                grp.appendChild(opt);
+            });
+            select.appendChild(grp);
+        }
+
+        if (studentClasses.length === 0) {
+            const opt = document.createElement('option');
+            opt.disabled = true;
+            opt.textContent = 'Sin clases registradas en el sistema';
+            select.appendChild(opt);
+        }
+
+        // Opción manual al final siempre
+        const sep = document.createElement('option');
+        sep.disabled = true;
+        sep.textContent = '──────────────';
+        select.appendChild(sep);
+        const manualOpt = document.createElement('option');
+        manualOpt.value = '__manual__';
+        manualOpt.textContent = '📝 Introducir clase manualmente...';
+        select.appendChild(manualOpt);
+    }
+
+    document.getElementById('addPaymentFormContainer').style.display = '';
+}
+
+function onClassSelectChange() {
+    const select = document.getElementById('paymentClassSelect');
+    const manualGroup = document.getElementById('paymentClassManualGroup');
+    if (!manualGroup) return;
+    const isManual = select && select.value === '__manual__';
+    manualGroup.style.display = isManual ? '' : 'none';
+    if (isManual) document.getElementById('paymentClassManual').focus();
+}
+
+function hideAddPaymentForm() {
+    const el = document.getElementById('addPaymentFormContainer');
+    if (el) el.style.display = 'none';
+    appState.addPaymentType = null;
+}
+
+async function submitAddPayment() {
+    const studentId = appState.viewingStudentId;
+    const type = appState.addPaymentType;
+    const amount = document.getElementById('paymentAmount').value;
+    const method = document.getElementById('paymentMethod').value || null;
+    let notes = document.getElementById('paymentNotes').value.trim() || null;
+
+    let period = null, classId = null;
+    if (type === 'monthly') {
+        period = document.getElementById('paymentPeriod').value || null;
+        if (!period) { showToast('Selecciona el mes', 'error'); return; }
+    } else {
+        classId = document.getElementById('paymentClassSelect').value || null;
+        if (!classId) { showToast('Selecciona la clase', 'error'); return; }
+        if (classId === '__manual__') {
+            const desc = document.getElementById('paymentClassManual').value.trim();
+            if (!desc) { showToast('Describe la clase manualmente', 'error'); return; }
+            notes = notes ? `${desc} — ${notes}` : desc;
+            classId = null;
+        }
+    }
+
+    try {
+        showLoading('Guardando pago...');
+        const result = await db.createPayment({
+            studentId,
+            classId,
+            period,
+            amount: amount !== '' ? parseFloat(amount) : null,
+            method,
+            notes,
+        });
+        appState.studentPayments.unshift(db.convertPaymentFromDB(result));
+        hideAddPaymentForm();
+        renderStudentPayments();
+        showToast('Pago registrado', 'success');
+    } catch (e) {
+        console.error('Error creating payment:', e);
+        showToast('Error al guardar el pago', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function togglePaymentPaid(paymentId) {
+    const payment = appState.studentPayments.find(p => p.id === paymentId);
+    if (!payment) return;
+    const newPaidDate = payment.paidDate ? null : new Date().toLocaleDateString('sv');
+    try {
+        await db.updatePayment(paymentId, { paidDate: newPaidDate });
+        payment.paidDate = newPaidDate;
+        renderStudentPayments();
+        showToast(newPaidDate ? 'Marcado como pagado' : 'Marcado como pendiente', 'success');
+    } catch (e) {
+        showToast('Error al actualizar el pago', 'error');
+    }
+}
+
+async function deleteStudentPayment(paymentId) {
+    try {
+        await db.deletePayment(paymentId);
+        appState.studentPayments = appState.studentPayments.filter(p => p.id !== paymentId);
+        renderStudentPayments();
+        showToast('Pago eliminado', 'success');
+    } catch (e) {
+        showToast('Error al eliminar el pago', 'error');
+    }
+}
+
 // Render students into quick dropdown list
 function renderStudentsDropdown(filter = '') {
     // Prefer modal list container, fallback to old dropdown id
@@ -1472,7 +1778,7 @@ function renderStudentsDropdown(filter = '') {
     container.innerHTML = '';
 
     const q = (filter || '').toLowerCase();
-    const list = appState.students.filter(s => s.name.toLowerCase().includes(q));
+    const list = appState.students.filter(s => s.active !== false && s.name.toLowerCase().includes(q));
 
     if (list.length === 0) {
         const empty = document.createElement('div');
@@ -1625,7 +1931,7 @@ function renderStudentsSelector() {
     function renderResults(q = '') {
         results.innerHTML = '';
         const query = (q || '').toLowerCase();
-        const list = appState.students.filter(s => s.name.toLowerCase().includes(query) || (s.email || '').toLowerCase().includes(query));
+        const list = appState.students.filter(s => s.active !== false && (s.name.toLowerCase().includes(query) || (s.email || '').toLowerCase().includes(query)));
         if (list.length === 0) {
             const e = document.createElement('div');
             e.style.color = 'var(--gray-500)';
@@ -1818,12 +2124,14 @@ function renderMonitorsList() {
 
     container.innerHTML = '';
 
-    if (appState.monitors.length === 0) {
+    const monitors = appState.monitors.filter(m => (m.permissions || []).includes('monitor'));
+
+    if (monitors.length === 0) {
         container.innerHTML = '<p style="text-align: center; color: var(--gray-500); padding: 2rem;">No hay monitores registrados. Agrega el primer monitor.</p>';
         return;
     }
 
-    appState.monitors.forEach(monitor => {
+    monitors.forEach(monitor => {
         const stats = getMonitorStats(monitor.id);
         const card = document.createElement('div');
         card.className = 'monitor-card';
@@ -2059,6 +2367,8 @@ function openAddClassModal(day = '', hour = null) {
     const form = document.getElementById('classForm');
     form.reset();
 
+    appState.selectedClass = null;
+
     document.getElementById('classModalTitle').textContent = 'Nueva Clase';
 
     if (day) {
@@ -2078,6 +2388,12 @@ function openAddClassModal(day = '', hour = null) {
 
     const commentsEl = document.getElementById('classComments');
     if (commentsEl) commentsEl.value = '';
+
+    const recurringSection = document.getElementById('recurringSection');
+    if (recurringSection) recurringSection.style.display = '';
+    const recurringEnabled = document.getElementById('recurringEnabled');
+    if (recurringEnabled) recurringEnabled.checked = false;
+
     openModal('classModal');
 }
 
@@ -2107,6 +2423,10 @@ function openEditClassModal(classId) {
     if (commentsEl) commentsEl.value = cls.comments || '';
 
     appState.selectedClass = classId;
+
+    const recurringSection = document.getElementById('recurringSection');
+    if (recurringSection) recurringSection.style.display = 'none';
+
     openModal('classModal');
 }
 
@@ -2296,7 +2616,62 @@ async function handleClassFormSubmit(e) {
             });
             appState.selectedClass = null;
         } else {
-            await addClass(day, startTime, endTime, selectedStudents);
+            const recurringChecked = document.getElementById('recurringEnabled')?.checked;
+
+            if (recurringChecked) {
+                const RECURRING_WEEKS = 52;
+                const groupId = generateId();
+                showLoading('Creando clases recurrentes...');
+
+                const currentUser = getCurrentUser();
+                let monitorId = null, monitorName = null;
+                if (isMonitor()) {
+                    monitorId = currentUser.id;
+                    monitorName = currentUser.name;
+                } else if (isCoordinator()) {
+                    monitorId = appState.selectedMonitor || null;
+                    monitorName = appState.selectedMonitor ? getMonitorById(appState.selectedMonitor)?.name : null;
+                }
+
+                const classesToCreate = [];
+                for (let w = 0; w < RECURRING_WEEKS; w++) {
+                    const classDate = new Date(date);
+                    classDate.setDate(classDate.getDate() + w * 7);
+                    if (w > 0 && hasClassTimeConflict(classDate, startTime, endTime, null)) continue;
+                    classesToCreate.push({
+                        id: generateId(),
+                        day,
+                        date: classDate.toISOString(),
+                        startTime: formatTime(startTime),
+                        endTime: formatTime(endTime),
+                        students: selectedStudents,
+                        maxCapacity: CONFIG.maxStudentsPerClass,
+                        status: 'active',
+                        isCompleted: false,
+                        monitorId,
+                        monitorName,
+                        comments,
+                        recurringGroupId: groupId,
+                    });
+                }
+
+                try {
+                    const results = await Promise.all(classesToCreate.map(c => db.createClass(c)));
+                    results.forEach(r => r && appState.classes.push(db.convertClassFromDB(r)));
+                } catch (dbError) {
+                    console.warn('createClass falló, guardando localmente:', dbError);
+                    classesToCreate.forEach(c => appState.classes.push(c));
+                }
+
+                renderCalendar();
+                saveToLocalStorage();
+                showToast(`${classesToCreate.length} clases recurrentes creadas`, 'success');
+            } else {
+                await addClassOnDate(date, day, startTime, endTime, selectedStudents, comments, null);
+                renderCalendar();
+                saveToLocalStorage();
+                showToast('Clase creada correctamente', 'success');
+            }
         }
 
         hideLoading();
@@ -2308,6 +2683,102 @@ async function handleClassFormSubmit(e) {
         console.error('Error saving class:', error);
         try { console.error('Error details:', JSON.stringify(error, null, 2)); } catch (e) {}
         showToast('Error guardando clase (ver consola)', 'error');
+    }
+}
+
+async function showDeleteClassModal(classId) {
+    const cls = getClassById(classId);
+    if (!cls) return;
+
+    if (!cls.recurringGroupId) {
+        closeModal('classDetailsModal');
+        await deleteClass(classId);
+        return;
+    }
+
+    appState.classToDelete = classId;
+
+    const desc = document.getElementById('deleteClassModalDesc');
+    if (desc) desc.textContent = '¿Quieres eliminar solo esta clase o todas las clases de esta serie recurrente?';
+
+    const recurringBtn = document.getElementById('deleteRecurringGroupConfirmBtn');
+    if (recurringBtn) recurringBtn.style.display = '';
+
+    closeModal('classDetailsModal');
+    openModal('deleteClassModal');
+}
+
+async function confirmDeleteSingleClass() {
+    const classId = appState.classToDelete;
+    if (!classId) return;
+    closeModal('deleteClassModal');
+    await deleteClass(classId);
+    appState.classToDelete = null;
+}
+
+async function confirmDeleteRecurringGroup() {
+    const classId = appState.classToDelete;
+    if (!classId) return;
+    const cls = getClassById(classId);
+    if (!cls || !cls.recurringGroupId) return;
+
+    closeModal('deleteClassModal');
+    showLoading('Eliminando clases recurrentes...');
+    try {
+        await db.deleteClassesByGroup(cls.recurringGroupId);
+        appState.classes = appState.classes.filter(c => c.recurringGroupId !== cls.recurringGroupId);
+        try { await loadAllData(); } catch (e) {}
+        saveToLocalStorage();
+        renderCalendar();
+        showToast('Clases recurrentes eliminadas', 'success');
+    } catch (error) {
+        console.error('Error deleting recurring group:', error);
+        showToast('Error al eliminar las clases recurrentes', 'error');
+    } finally {
+        hideLoading();
+        appState.classToDelete = null;
+        appState.selectedClass = null;
+    }
+}
+
+async function addClassOnDate(date, day, startTime, endTime, studentIds, comments, recurringGroupId = null) {
+    const currentUser = getCurrentUser();
+    let monitorId = null;
+    let monitorName = null;
+
+    if (isMonitor()) {
+        monitorId = currentUser.id;
+        monitorName = currentUser.name;
+    } else if (isCoordinator()) {
+        monitorId = appState.selectedMonitor || null;
+        monitorName = appState.selectedMonitor ? getMonitorById(appState.selectedMonitor)?.name : null;
+    }
+
+    const newClass = {
+        id: generateId(),
+        day,
+        date: date.toISOString(),
+        startTime: formatTime(startTime),
+        endTime: formatTime(endTime),
+        students: studentIds,
+        maxCapacity: CONFIG.maxStudentsPerClass,
+        status: 'active',
+        isCompleted: false,
+        monitorId,
+        monitorName,
+        comments,
+        recurringGroupId,
+    };
+
+    try {
+        const result = await db.createClass(newClass);
+        const converted = db.convertClassFromDB(result);
+        appState.classes.push(converted);
+        return converted;
+    } catch (dbError) {
+        console.warn('db.createClass falló, guardando localmente:', dbError);
+        appState.classes.push(newClass);
+        return newClass;
     }
 }
 
@@ -2543,63 +3014,9 @@ function closeMonitorModal() {
     closeModal('monitorModal');
 }
 
-function showMonitorLogin() {
-    const select = document.getElementById('monitorSelect');
-
-    select.innerHTML = '<option value="">--- Nuevo Monitor ---</option>';
-    appState.monitors.forEach(monitor => {
-        const option = document.createElement('option');
-        option.value = monitor.id;
-        option.textContent = monitor.name;
-        select.appendChild(option);
-    });
-
-    select.addEventListener('change', function () {
-        const newNameGroup = document.getElementById('newMonitorNameGroup');
-        newNameGroup.style.display = this.value === '' ? 'block' : 'none';
-    });
-
-    openModal('monitorLoginModal');
-}
-
-function closeMonitorLoginModal() {
-    closeModal('monitorLoginModal');
-}
-
-async function handleMonitorLogin() {
-    const select = document.getElementById('monitorSelect');
-    const monitorId = select.value;
-
-    if (monitorId) {
-        login('monitor', monitorId);
-    } else {
-        const newName = document.getElementById('newMonitorName').value.trim();
-        if (!newName) {
-            showToast('Por favor ingresa tu nombre', 'error');
-            return;
-        }
-        await login('monitor', null, newName);
-    }
-
-    closeMonitorLoginModal();
-}
-
 // ==========================================
 // UI MANAGEMENT
 // ==========================================
-
-function showLoginScreen() {
-    // #app-view debe estar visible para que #loginScreen (que vive dentro) se muestre
-    const appView = document.getElementById('app-view');
-    if (appView) appView.style.display = 'block';
-    const loginScreen = document.getElementById('loginScreen');
-    if (loginScreen) loginScreen.style.display = 'flex';
-}
-
-function hideLoginScreen() {
-    const loginScreen = document.getElementById('loginScreen');
-    if (loginScreen) loginScreen.style.display = 'none';
-}
 
 function showMainApp() {
     const appView = document.getElementById('app-view');
@@ -2613,6 +3030,8 @@ function showMainApp() {
 
     if (isCoordinator()) {
         showCoordinatorDashboard();
+    } else if (isRecepcion()) {
+        showRecepcionView();
     } else {
         showMonitorView();
     }
@@ -2630,7 +3049,9 @@ function updateHeaderForUser() {
     const currentUser = getCurrentUser();
 
     if (userDisplay && currentUser) {
-        const roleEmoji = currentUser.role === 'coordinator' ? '👔' : '🎾';
+        let roleEmoji = '🎾';
+        if (isCoordinator()) roleEmoji = '👔';
+        else if (isRecepcion()) roleEmoji = '🏢';
         userDisplay.innerHTML = `${roleEmoji} ${currentUser.name}`;
     }
 }
@@ -2638,9 +3059,11 @@ function updateHeaderForUser() {
 function showCoordinatorDashboard() {
     const calendarSection = document.getElementById('calendarSectionContainer');
     const coordinatorDashboard = document.getElementById('coordinatorDashboard');
+    const recepcionDashboard = document.getElementById('recepcionDashboard');
     const sidebar = document.getElementById('sidebar');
 
     if (calendarSection) calendarSection.style.display = 'none';
+    if (recepcionDashboard) recepcionDashboard.style.display = 'none';
     if (coordinatorDashboard) {
         coordinatorDashboard.style.display = 'block';
         renderMonitorsList();
@@ -2651,14 +3074,117 @@ function showCoordinatorDashboard() {
 function showMonitorView() {
     const calendarSection = document.getElementById('calendarSectionContainer');
     const coordinatorDashboard = document.getElementById('coordinatorDashboard');
+    const recepcionDashboard = document.getElementById('recepcionDashboard');
     const sidebar = document.getElementById('sidebar');
 
     if (calendarSection) calendarSection.style.display = 'block';
     if (coordinatorDashboard) coordinatorDashboard.style.display = 'none';
+    if (recepcionDashboard) recepcionDashboard.style.display = 'none';
     if (sidebar) sidebar.style.display = 'block';
 
     renderCalendar();
     renderStudentsList();
+}
+
+function showRecepcionView() {
+    const calendarSection = document.getElementById('calendarSectionContainer');
+    const coordinatorDashboard = document.getElementById('coordinatorDashboard');
+    const recepcionDashboard = document.getElementById('recepcionDashboard');
+    const sidebar = document.getElementById('sidebar');
+
+    if (calendarSection) calendarSection.style.display = 'none';
+    if (coordinatorDashboard) coordinatorDashboard.style.display = 'none';
+    if (recepcionDashboard) recepcionDashboard.style.display = 'block';
+    if (sidebar) sidebar.style.display = 'none';
+
+    renderRecepcionStudentsList();
+}
+
+function renderRecepcionStudentsList() {
+    const container = document.getElementById('recepcionStudentsList');
+    if (!container) return;
+    const searchInput = document.getElementById('recepcionStudentSearch');
+    const query = searchInput ? searchInput.value.toLowerCase() : '';
+    const all = appState.students.filter(s => s.name.toLowerCase().includes(query));
+    const active = all.filter(s => s.active !== false);
+    const inactive = all.filter(s => s.active === false);
+
+    if (all.length === 0) {
+        container.innerHTML = '<div class="recepcion-empty">No se encontraron alumnos.</div>';
+        return;
+    }
+
+    const renderCard = (s, isInactive) => {
+        const initials = s.name.trim().split(/\s+/).map(w => w[0]).join('').substring(0, 2).toUpperCase();
+        const contact = s.phone || s.email || '';
+        return `
+        <div class="recepcion-card ${isInactive ? 'recepcion-card-inactive' : ''}">
+            <div class="recepcion-card-avatar ${isInactive ? 'recepcion-card-avatar-inactive' : ''}">${escapeHtml(initials)}</div>
+            <div class="recepcion-card-name">${escapeHtml(s.name)}</div>
+            ${isInactive ? '<div class="recepcion-baja-badge">De baja</div>' : ''}
+            ${contact ? `<div class="recepcion-card-contact">${escapeHtml(contact)}</div>` : ''}
+            <div class="recepcion-card-btns">
+                <button class="btn btn-primary btn-sm" data-action="ficha" data-student-id="${escapeHtml(s.id)}">Ver ficha</button>
+                ${isInactive
+                    ? `<button class="btn btn-secondary btn-sm" data-action="reactivar" data-student-id="${escapeHtml(s.id)}">Reactivar</button>`
+                    : `<button class="btn btn-sm btn-baja" data-action="baja" data-student-id="${escapeHtml(s.id)}">Dar de baja</button>`
+                }
+            </div>
+        </div>`;
+    };
+
+    let html = active.map(s => renderCard(s, false)).join('');
+
+    if (inactive.length > 0) {
+        html += `<div class="recepcion-baja-section-title">Alumnos de baja (${inactive.length})</div>`;
+        html += inactive.map(s => renderCard(s, true)).join('');
+    }
+
+    container.innerHTML = html;
+
+    container.onclick = (e) => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const { action, studentId } = btn.dataset;
+        if (action === 'ficha') showStudentProfile(studentId);
+        else if (action === 'baja') confirmDeactivateStudent(studentId);
+        else if (action === 'reactivar') reactivateStudent(studentId);
+    };
+}
+
+function confirmDeactivateStudent(studentId) {
+    const student = getStudentById(studentId);
+    if (!student) return;
+    document.getElementById('deactivateStudentModalDesc').textContent =
+        `¿Dar de baja a ${student.name}?`;
+    const btn = document.getElementById('deactivateStudentConfirmBtn');
+    btn.onclick = async () => {
+        closeModal('deactivateStudentModal');
+        try {
+            await db.setStudentActive(studentId, false);
+            const s = appState.students.find(s => s.id === studentId);
+            if (s) s.active = false;
+            renderRecepcionStudentsList();
+            showToast(`${student.name} dado de baja`, 'success');
+        } catch (e) {
+            showToast('Error al dar de baja al alumno', 'error');
+        }
+    };
+    openModal('deactivateStudentModal');
+}
+
+async function reactivateStudent(studentId) {
+    const student = getStudentById(studentId);
+    if (!student) return;
+    try {
+        await db.setStudentActive(studentId, true);
+        const s = appState.students.find(s => s.id === studentId);
+        if (s) s.active = true;
+        renderRecepcionStudentsList();
+        showToast(`${student.name} reactivado`, 'success');
+    } catch (e) {
+        showToast('Error al reactivar al alumno', 'error');
+    }
 }
 
 function viewMonitorClasses(monitorId) {
@@ -2684,7 +3210,8 @@ function goHome() {
     appState.viewingMonitorId = null;
     appState.currentUser = null;
     hideMainApp();
-    showLoginScreen();
+    const loginView = document.getElementById('login-view');
+    if (loginView) loginView.style.display = 'flex';
 }
 
 async function confirmDeleteMonitor(monitorId) {
@@ -2776,12 +3303,15 @@ function initializeEventListeners() {
     });
 
     const deleteClassBtnEl = getEl('deleteClassBtn');
-    if (deleteClassBtnEl) deleteClassBtnEl.addEventListener('click', async () => {
-        if (confirm('¿Estás seguro de eliminar esta clase?')) {
-            await deleteClass(appState.selectedClass);
-            closeModal('classDetailsModal');
-        }
+    if (deleteClassBtnEl) deleteClassBtnEl.addEventListener('click', () => {
+        showDeleteClassModal(appState.selectedClass);
     });
+
+    const deleteSingleBtn = getEl('deleteSingleClassConfirmBtn');
+    if (deleteSingleBtn) deleteSingleBtn.addEventListener('click', confirmDeleteSingleClass);
+
+    const deleteRecurringBtn = getEl('deleteRecurringGroupConfirmBtn');
+    if (deleteRecurringBtn) deleteRecurringBtn.addEventListener('click', confirmDeleteRecurringGroup);
 
     const toggleCompletedBtnEl = getEl('toggleCompletedBtn');
     if (toggleCompletedBtnEl) toggleCompletedBtnEl.addEventListener('click', () => toggleClassCompleted(appState.selectedClass));
@@ -3005,8 +3535,6 @@ async function initializeApp() {
                 const { data, error } = await supabase.auth.getSession();
                 if (error) {
                     console.warn('No se pudo obtener la sesión de Supabase al iniciar:', error);
-                    // Token caducado/revocado guardado en el navegador: limpiar el
-                    // estado local para que no reintente el refresh en cada recarga.
                     await supabase.auth.signOut().catch(() => {});
                 }
 
@@ -3014,18 +3542,38 @@ async function initializeApp() {
 
                 if (!hasSession) {
                     if (loginView) loginView.style.display = 'flex';
-                    hideLoginScreen();
                     hideMainApp();
                     hideLoading();
                     return;
-                } else {
-                    if (loginView) loginView.style.display = 'none';
                 }
+
+                // Fetch monitor row to get name and permissions
+                const { data: monitorRow, error: monitorError } = await supabase
+                    .from('monitors')
+                    .select('*')
+                    .eq('auth_user_id', data.session.user.id)
+                    .single();
+
+                if (monitorError || !monitorRow) {
+                    console.warn('Usuario sin fila en monitors, cerrando sesión.');
+                    await supabase.auth.signOut().catch(() => {});
+                    if (loginView) loginView.style.display = 'flex';
+                    hideMainApp();
+                    hideLoading();
+                    return;
+                }
+
+                appState.currentUser = {
+                    id: monitorRow.id,
+                    name: monitorRow.name,
+                    permissions: monitorRow.permissions || [],
+                };
+
+                if (loginView) loginView.style.display = 'none';
             } catch (sessionError) {
                 console.warn('Error comprobando sesión de Supabase al iniciar:', sessionError);
                 await supabase.auth.signOut().catch(() => {});
                 if (loginView) loginView.style.display = 'flex';
-                hideLoginScreen();
                 hideMainApp();
                 hideLoading();
                 return;
@@ -3047,15 +3595,11 @@ async function initializeApp() {
             }
         }
 
-        // Check if user is logged in (from localStorage)
-        const savedUser = localStorage.getItem('padelApp_currentUser');
-        if (savedUser) {
-            appState.currentUser = JSON.parse(savedUser);
-            hideLoginScreen();
+        if (appState.currentUser) {
             showMainApp();
         } else {
             hideMainApp();
-            showLoginScreen();
+            if (loginView) loginView.style.display = 'flex';
         }
     } catch (error) {
         console.error('Error initializing app:', error);
