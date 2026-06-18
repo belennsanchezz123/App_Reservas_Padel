@@ -557,6 +557,107 @@ const db = {
             createdAt: p.created_at,
         };
     },
+
+    // ==========================================
+    // MATCHES (partidos por nivel — estilo Playtomic)
+    // ==========================================
+
+    async getMatches() {
+        try {
+            const { data, error } = await supabase
+                .from('matches')
+                .select('*')
+                .order('match_date', { ascending: true })
+                .order('start_time', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting matches:', error);
+            throw error;
+        }
+    },
+
+    async createMatch(match) {
+        try {
+            const { data, error } = await supabase
+                .from('matches')
+                .insert([{
+                    match_date: match.matchDate,
+                    start_time: match.startTime,
+                    match_type: match.matchType || 'competitive',
+                    level_min: match.levelMin,
+                    level_max: match.levelMax,
+                    players: match.players || [],
+                    comments: match.comments || null,
+                }])
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error creating match:', error);
+            throw error;
+        }
+    },
+
+    async updateMatch(id, updates) {
+        try {
+            // Conversión camelCase (app) -> snake_case (Supabase)
+            const dbUpdates = {};
+            if (updates.matchDate !== undefined) dbUpdates.match_date = updates.matchDate;
+            if (updates.startTime !== undefined) dbUpdates.start_time = updates.startTime;
+            if (updates.matchType !== undefined) dbUpdates.match_type = updates.matchType;
+            if (updates.levelMin !== undefined) dbUpdates.level_min = updates.levelMin;
+            if (updates.levelMax !== undefined) dbUpdates.level_max = updates.levelMax;
+            if (updates.players !== undefined) dbUpdates.players = updates.players;
+            if (updates.winner !== undefined) dbUpdates.winner = updates.winner;
+            if (updates.isCompleted !== undefined) dbUpdates.is_completed = updates.isCompleted;
+            if (updates.comments !== undefined) dbUpdates.comments = updates.comments;
+
+            const { data, error } = await supabase
+                .from('matches')
+                .update(dbUpdates)
+                .eq('id', id)
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error updating match:', error);
+            throw error;
+        }
+    },
+
+    async deleteMatch(id) {
+        try {
+            const { error } = await supabase
+                .from('matches')
+                .delete()
+                .eq('id', id);
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error deleting match:', error);
+            throw error;
+        }
+    },
+
+    convertMatchFromDB(m) {
+        if (!m) return null;
+        return {
+            id: m.id,
+            matchDate: m.match_date ? String(m.match_date).substring(0, 10) : null,
+            startTime: m.start_time ? String(m.start_time).substring(0, 5) : '',
+            matchType: m.match_type || 'competitive',
+            levelMin: m.level_min !== null && m.level_min !== undefined ? parseFloat(m.level_min) : null,
+            levelMax: m.level_max !== null && m.level_max !== undefined ? parseFloat(m.level_max) : null,
+            players: m.players || [],
+            winner: m.winner || null,
+            isCompleted: m.is_completed || false,
+            comments: m.comments || '',
+            createdAt: m.created_at,
+        };
+    },
 };
 
 // NOTA: la lógica de sesión (login, logout, comprobación de sesión) vive

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestión de Clases de Pádel</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=16">
+    <link rel="stylesheet" href="styles.css?v=17">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -94,12 +94,50 @@
                             <p class="recepcion-subtitle">Gestión de pagos de alumnos</p>
                         </div>
                     </div>
-                    <div class="recepcion-search-wrap">
+                    <div class="recepcion-search-wrap" id="recepcionSearchWrap">
                         <span class="recepcion-search-icon">🔍</span>
                         <input type="text" id="recepcionStudentSearch" class="recepcion-search-input" placeholder="Buscar alumno..." oninput="renderRecepcionStudentsList()">
                     </div>
                 </div>
-                <div id="recepcionStudentsList" class="recepcion-grid"></div>
+
+                <!-- Pestañas: Pagos / Partidos / Categorías -->
+                <div class="recepcion-tabs" role="tablist">
+                    <button class="recepcion-tab active" id="recepcionTabPagos" role="tab" onclick="switchRecepcionTab('pagos')">💳 Pagos</button>
+                    <button class="recepcion-tab" id="recepcionTabPartidos" role="tab" onclick="switchRecepcionTab('partidos')">🎾 Partidos / Niveles</button>
+                    <button class="recepcion-tab" id="recepcionTabCategorias" role="tab" onclick="switchRecepcionTab('categorias')">📊 Categorías</button>
+                </div>
+
+                <!-- Vista Pagos (existente) -->
+                <div id="recepcionPagosView">
+                    <div id="recepcionStudentsList" class="recepcion-grid"></div>
+                </div>
+
+                <!-- Vista Partidos (nueva, estilo Playtomic) -->
+                <div id="recepcionPartidosView" style="display:none;">
+                    <div class="matches-toolbar">
+                        <button class="btn btn-primary" onclick="openCreateMatchModal()">
+                            <span class="btn-icon">+</span> Montar partido
+                        </button>
+                    </div>
+                    <div id="matchesList" class="matches-list"></div>
+                </div>
+
+                <!-- Vista Categorías (agrupación de alumnos por nivel) -->
+                <div id="recepcionCategoriasView" style="display:none;">
+                    <div class="categorias-toolbar">
+                        <label for="categoriaFilter" class="categorias-filter-label">Filtrar por categoría:</label>
+                        <select id="categoriaFilter" class="categorias-filter-select" onchange="renderCategoriasView()">
+                            <option value="all">Todas las categorías</option>
+                            <option value="primera">Primera (≥ 5.5)</option>
+                            <option value="segunda">Segunda (4.5 – 5.5)</option>
+                            <option value="tercera">Tercera (3.5 – 4.5)</option>
+                            <option value="cuarta">Cuarta (2.5 – 3.5)</option>
+                            <option value="quinta">Quinta (&lt; 2.5)</option>
+                            <option value="sin">Sin clasificar</option>
+                        </select>
+                    </div>
+                    <div id="categoriasList" class="categorias-list"></div>
+                </div>
             </div>
         </section>
 
@@ -578,6 +616,71 @@
         </div>
     </div>
 
+    <!-- Modal: Montar partido -->
+    <div class="modal" id="matchModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Montar partido</h3>
+                <button class="btn-close" onclick="closeModal('matchModal')">✕</button>
+            </div>
+            <form id="matchForm" onsubmit="event.preventDefault(); submitMatch();">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="matchDate">Fecha</label>
+                        <input type="date" id="matchDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="matchTime">Hora</label>
+                        <select id="matchTime" required>
+                            <!-- Opciones (cada 15 min) inyectadas por JS -->
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="matchType">Tipo de partido</label>
+                        <select id="matchType">
+                            <option value="competitive">Competitivo</option>
+                            <option value="friendly">Amistoso</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Rango de nivel</label>
+                        <div style="display:flex; gap:var(--spacing-sm); align-items:center;">
+                            <input type="number" id="matchLevelMin" step="0.1" min="0" max="5" value="0.5" style="flex:1;">
+                            <span>–</span>
+                            <input type="number" id="matchLevelMax" step="0.1" min="0" max="5" value="5.0" style="flex:1;">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Jugadores (máx. 4 · los 2 primeros = Pareja A, los 2 siguientes = Pareja B)</label>
+                    <div class="players-selector" id="matchPlayersSelector">
+                        <!-- Inyectado por JS -->
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('matchModal')">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar partido</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Registrar resultado -->
+    <div class="modal" id="matchResultModal">
+        <div class="modal-content modal-compact">
+            <div class="modal-header">
+                <h3>Registrar resultado</h3>
+                <button class="btn-close" onclick="closeModal('matchResultModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>¿Qué pareja ganó el partido? Los dos jugadores ganadores subirán <strong>+0.1</strong> de nivel.</p>
+                <div id="matchResultTeams" class="match-result-teams"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
@@ -588,11 +691,11 @@
     <!-- 1. First load Supabase library from local node_modules -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
     <!-- 2. Then initialize Supabase client with detailed logging -->
-    <script src="supabase-init.js?v=16"></script>
+    <script src="supabase-init.js?v=17"></script>
     <!-- 3. Then load database layer -->
-    <script src="db.js?v=16"></script>
+    <script src="db.js?v=17"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=16"></script>
+    <script src="app.js?v=17"></script>
 </body>
 
 </html>

@@ -87,6 +87,23 @@ App_Reservas_Padel/
 
 En la app (`db.js.convertClassFromDB`) `start_at`/`end_at` se convierten a `startTime`/`endTime` (HH:MM) y `date` (YYYY-MM-DD).
 
+### matches (partidos por nivel, estilo Playtomic)
+| Campo | Tipo |
+|---|---|
+| id | uuid |
+| match_date | date |
+| start_time | time |
+| match_type | text (`competitive` / `friendly`) |
+| level_min | numeric(3,1) (filtro de acceso al partido) |
+| level_max | numeric(3,1) (filtro de acceso al partido) |
+| players | uuid[] (hasta 4; `[0,1]`=Pareja A, `[2,3]`=Pareja B) |
+| winner | text (`A` / `B` / null) |
+| is_completed | boolean |
+| comments | text |
+| created_at | timestamptz |
+
+El nivel individual de cada jugador vive en `students.level` (numeric 0–5), **no** en `matches`. Al registrar resultado (`registerMatchResult` en `app.js`), los 2 jugadores de la pareja ganadora suman **+0.1** a `students.level`. `level_min`/`level_max` son solo el rango de acceso recomendado del partido. Migración SQL en `matches.sql`. La sección vive en una pestaña ("Partidos / Niveles") dentro del panel de Recepción.
+
 ## Roles de usuario
 
 - **Coordinador**: ve todos los monitores y sus clases, puede exportar a Excel.

@@ -17,6 +17,9 @@ const appState = {
     monitors: [],
     currentUser: null,
     viewingMonitorId: null,
+    matches: [],
+    recepcionTab: 'pagos',
+    matchTempPlayers: [],
 };
 
 const CONFIG = {
@@ -684,20 +687,27 @@ async function loadAllData() {
     try {
         showLoading('Cargando datos...');
 
-        const [monitorsData, studentsData, classesData] = await Promise.all([
+        const [monitorsData, studentsData, classesData, matchesData] = await Promise.all([
             db.getMonitors(),
             db.getStudents(),
-            db.getClasses()
+            db.getClasses(),
+            db.getMatches().catch(err => {
+                // La tabla matches puede no existir aún (ejecutar matches.sql).
+                console.warn('No se pudieron cargar los partidos (¿falta ejecutar matches.sql?):', err);
+                return [];
+            })
         ]);
 
         appState.monitors = monitorsData.map(m => db.convertMonitorFromDB(m));
         appState.students = studentsData.map(s => db.convertStudentFromDB(s));
         appState.classes = classesData.map(c => db.convertClassFromDB(c));
+        appState.matches = matchesData.map(m => db.convertMatchFromDB(m));
 
         console.log('✅ Datos cargados:', {
             monitors: appState.monitors.length,
             students: appState.students.length,
-            classes: appState.classes.length
+            classes: appState.classes.length,
+            matches: appState.matches.length
         });
 
         hideLoading();
@@ -3097,7 +3107,7 @@ function showRecepcionView() {
     if (recepcionDashboard) recepcionDashboard.style.display = 'block';
     if (sidebar) sidebar.style.display = 'none';
 
-    renderRecepcionStudentsList();
+    switchRecepcionTab(appState.recepcionTab || 'pagos');
 }
 
 function renderRecepcionStudentsList() {
@@ -3185,6 +3195,400 @@ async function reactivateStudent(studentId) {
     } catch (e) {
         showToast('Error al reactivar al alumno', 'error');
     }
+}
+
+// ==========================================
+// PARTIDOS / NIVELES (estilo Playtomic)
+// ==========================================
+// Sección dentro del panel de Recepción (pestaña "Partidos / Niveles").
+// Cada partido muestra hasta 4 jugadores con su nivel individual (students.level).
+// Al registrar el resultado, los 2 jugadores de la pareja ganadora suben +0.1.
+
+// Cambia entre las vistas de Recepción: Pagos, Partidos y Categorías.
+function switchRecepcionTab(tab) {
+    appState.recepcionTab = tab;
+
+    // Mostrar solo la vista activa.
+    document.getElementById('recepcionPagosView').style.display = tab === 'pagos' ? '' : 'none';
+    document.getElementById('recepcionPartidosView').style.display = tab === 'partidos' ? '' : 'none';
+    document.getElementById('recepcionCategoriasView').style.display = tab === 'categorias' ? '' : 'none';
+
+    // Resaltar la pestaña activa.
+    document.getElementById('recepcionTabPagos').classList.toggle('active', tab === 'pagos');
+    document.getElementById('recepcionTabPartidos').classList.toggle('active', tab === 'partidos');
+    document.getElementById('recepcionTabCategorias').classList.toggle('active', tab === 'categorias');
+
+    // El buscador de alumnos solo aplica a la vista de pagos.
+    const searchWrap = document.getElementById('recepcionSearchWrap');
+    if (searchWrap) searchWrap.style.visibility = tab === 'pagos' ? 'visible' : 'hidden';
+
+    if (tab === 'pagos') renderRecepcionStudentsList();
+    else if (tab === 'partidos') renderMatchesList();
+    else if (tab === 'categorias') renderCategoriasView();
+}
+
+// Categorías de nivel (límite inferior incluido, superior excluido).
+const LEVEL_CATEGORIES = [
+    { key: 'primera', name: 'Primera', range: '≥ 5.5', min: 5.5, max: Infinity },
+    { key: 'segunda', name: 'Segunda', range: '4.5 – 5.5', min: 4.5, max: 5.5 },
+    { key: 'tercera', name: 'Tercera', range: '3.5 – 4.5', min: 3.5, max: 4.5 },
+    { key: 'cuarta', name: 'Cuarta', range: '2.5 – 3.5', min: 2.5, max: 3.5 },
+    { key: 'quinta', name: 'Quinta', range: '< 2.5', min: -Infinity, max: 2.5 },
+];
+
+// Devuelve la key de categoría de un nivel, o 'sin' si no tiene nivel asignado.
+function getStudentCategory(level) {
+    if (level === null || level === undefined || level === '' || isNaN(level)) return 'sin';
+    const n = Number(level);
+    const cat = LEVEL_CATEGORIES.find(c => n >= c.min && n < c.max);
+    return cat ? cat.key : 'sin';
+}
+
+function renderCategoriasView() {
+    const container = document.getElementById('categoriasList');
+    if (!container) return;
+    const filter = document.getElementById('categoriaFilter')?.value || 'all';
+
+    // Solo alumnos activos, agrupados por categoría.
+    const active = appState.students.filter(s => s.active !== false);
+
+    // Construir grupos en orden: Primera → Quinta y, al final, Sin clasificar.
+    const groups = LEVEL_CATEGORIES.map(c => ({
+        ...c,
+        students: active.filter(s => getStudentCategory(s.level) === c.key),
+    }));
+    groups.push({
+        key: 'sin', name: 'Sin clasificar', range: 'sin nivel asignado',
+        students: active.filter(s => getStudentCategory(s.level) === 'sin'),
+    });
+
+    const visible = filter === 'all' ? groups : groups.filter(g => g.key === filter);
+
+    if (active.length === 0) {
+        container.innerHTML = '<div class="recepcion-empty">No hay alumnos.</div>';
+        return;
+    }
+
+    container.innerHTML = visible.map(g => {
+        const cards = g.students.length
+            ? g.students.map(s => `
+                <div class="categoria-student">
+                    <span class="categoria-student-name">${escapeHtml(s.name)}</span>
+                    <span class="match-level-badge sm">${escapeHtml(formatLevel(s.level))}</span>
+                </div>`).join('')
+            : '<div class="players-hint">Sin alumnos en esta categoría.</div>';
+        return `
+        <div class="categoria-group">
+            <div class="categoria-group-header">
+                <span class="categoria-group-name">${escapeHtml(g.name)}</span>
+                <span class="categoria-group-range">${escapeHtml(g.range)}</span>
+                <span class="categoria-group-count">${g.students.length}</span>
+            </div>
+            <div class="categoria-students">${cards}</div>
+        </div>`;
+    }).join('');
+}
+
+// Formatea un nivel numérico (1.2, 2, 3.5...) con un decimal, o '—' si no hay.
+function formatLevel(level) {
+    if (level === null || level === undefined || level === '' || isNaN(level)) return '—';
+    return Number(level).toFixed(1);
+}
+
+// Iniciales para el avatar circular del jugador.
+function getInitials(name) {
+    return String(name || '?').trim().split(/\s+/).map(w => w[0]).join('').substring(0, 2).toUpperCase();
+}
+
+// Devuelve la etiqueta legible del tipo de partido.
+function matchTypeLabel(type) {
+    return type === 'friendly' ? 'Amistoso' : 'Competitivo';
+}
+
+// Fecha legible: "Hoy", "Mañana" o "lun 23 jun".
+function formatMatchDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(`${dateStr}T00:00:00`);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const diff = Math.round((d - today) / 86400000);
+    if (diff === 0) return 'Hoy';
+    if (diff === 1) return 'Mañana';
+    if (diff === -1) return 'Ayer';
+    return d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function renderMatchesList() {
+    const container = document.getElementById('matchesList');
+    if (!container) return;
+
+    if (!appState.matches.length) {
+        container.innerHTML = '<div class="recepcion-empty">No hay partidos. Pulsa "Montar partido" para crear el primero.</div>';
+        return;
+    }
+
+    container.innerHTML = appState.matches.map(buildMatchCard).join('');
+
+    container.onclick = (e) => {
+        const btn = e.target.closest('button[data-match-action]');
+        if (!btn) return;
+        const { matchAction, matchId } = btn.dataset;
+        if (matchAction === 'result') openMatchResultModal(matchId);
+        else if (matchAction === 'delete') confirmDeleteMatch(matchId);
+    };
+}
+
+// Construye una tarjeta de partido (cabecera + slots de jugadores).
+function buildMatchCard(match) {
+    const slots = [];
+    for (let i = 0; i < 4; i++) {
+        const playerId = match.players[i];
+        if (playerId) {
+            const student = getStudentById(playerId);
+            const name = student ? student.name : 'Alumno';
+            const level = student ? student.level : null;
+            slots.push(`
+                <div class="match-player">
+                    <div class="match-player-avatar">${escapeHtml(getInitials(name))}</div>
+                    <div class="match-player-name">${escapeHtml(name.split(' ')[0])}</div>
+                    <div class="match-level-badge">${escapeHtml(formatLevel(level))}</div>
+                </div>`);
+        } else {
+            slots.push(`
+                <div class="match-player match-player-empty">
+                    <div class="match-player-avatar match-slot-available">+</div>
+                    <div class="match-player-name">Libre</div>
+                </div>`);
+        }
+        // Separador visual entre Pareja A (0,1) y Pareja B (2,3)
+        if (i === 1) slots.push('<div class="match-vs">VS</div>');
+    }
+
+    const winnerLabel = match.winner
+        ? `<span class="match-winner-tag">🏆 Ganó Pareja ${escapeHtml(match.winner)}</span>`
+        : '';
+
+    return `
+    <div class="match-card ${match.isCompleted ? 'match-card-done' : ''}">
+        <div class="match-card-header">
+            <div class="match-card-when">
+                <span class="match-card-date">${escapeHtml(formatMatchDate(match.matchDate))} a las ${escapeHtml(match.startTime)}</span>
+                <div class="match-card-tags">
+                    <span class="match-type-chip">🎾 ${escapeHtml(matchTypeLabel(match.matchType))}</span>
+                    <span class="match-range-chip">${escapeHtml(formatLevel(match.levelMin))} - ${escapeHtml(formatLevel(match.levelMax))}</span>
+                    ${winnerLabel}
+                </div>
+            </div>
+            <button class="btn-icon-sm match-delete-btn" data-match-action="delete" data-match-id="${escapeHtml(match.id)}" title="Eliminar partido">🗑️</button>
+        </div>
+        <div class="match-players-row">
+            ${slots.join('')}
+        </div>
+        <div class="match-card-footer">
+            ${match.isCompleted
+                ? '<span class="match-done-text">Resultado registrado</span>'
+                : `<button class="btn btn-primary btn-sm" data-match-action="result" data-match-id="${escapeHtml(match.id)}">Registrar resultado</button>`
+            }
+        </div>
+    </div>`;
+}
+
+// --- Crear / montar partido ------------------------------------------------
+
+// Rellena el <select> de hora con franjas cada 15 min (solo :00, :15, :30, :45).
+function populateMatchTimeOptions() {
+    const select = document.getElementById('matchTime');
+    if (!select) return;
+    const startH = CONFIG.hoursStart; // 7
+    const endH = CONFIG.hoursEnd;      // 23
+    let html = '<option value="">--:--</option>';
+    for (let h = startH; h <= endH; h++) {
+        for (const m of ['00', '15', '30', '45']) {
+            if (h === endH && m !== '00') break; // no pasar de 23:00
+            const hh = String(h).padStart(2, '0');
+            html += `<option value="${hh}:${m}">${hh}:${m}</option>`;
+        }
+    }
+    select.innerHTML = html;
+}
+
+function openCreateMatchModal() {
+    document.getElementById('matchForm').reset();
+    populateMatchTimeOptions();
+    document.getElementById('matchLevelMin').value = '0.5';
+    document.getElementById('matchLevelMax').value = '5.0';
+    document.getElementById('matchType').value = 'competitive';
+    appState.matchTempPlayers = [];
+    renderMatchPlayersSelector();
+    openModal('matchModal');
+}
+
+// Selector de jugadores: pills de seleccionados + buscador de alumnos.
+function renderMatchPlayersSelector(query = '') {
+    const container = document.getElementById('matchPlayersSelector');
+    if (!container) return;
+
+    const selected = appState.matchTempPlayers;
+    const pills = selected.map((id, idx) => {
+        const s = getStudentById(id);
+        const team = idx < 2 ? 'A' : 'B';
+        return `
+        <span class="player-pill player-pill-team-${team}">
+            <span class="player-pill-team">${team}</span>
+            ${escapeHtml(s ? s.name : 'Alumno')}
+            <span class="player-pill-level">${escapeHtml(formatLevel(s ? s.level : null))}</span>
+            <button type="button" class="player-pill-remove" onclick="removeMatchPlayer('${escapeHtml(id)}')">✕</button>
+        </span>`;
+    }).join('');
+
+    const full = selected.length >= 4;
+    const q = query.toLowerCase();
+    const results = full ? [] : appState.students
+        .filter(s => s.active !== false && !selected.includes(s.id) && s.name.toLowerCase().includes(q))
+        .slice(0, 6)
+        .map(s => `
+            <div class="player-result" onclick="addMatchPlayer('${escapeHtml(s.id)}')">
+                <span>${escapeHtml(s.name)}</span>
+                <span class="match-level-badge sm">${escapeHtml(formatLevel(s.level))}</span>
+            </div>`).join('');
+
+    container.innerHTML = `
+        <div class="player-pills">${pills || '<span class="players-hint">Aún no hay jugadores.</span>'}</div>
+        ${full
+            ? '<div class="players-hint">Partido completo (4 jugadores).</div>'
+            : `<input type="text" class="player-search-input" placeholder="Buscar alumno..." oninput="renderMatchPlayersSelector(this.value)" value="${escapeHtml(query)}">
+               <div class="player-results">${results || '<div class="players-hint">Sin resultados.</div>'}</div>`
+        }`;
+
+    // Mantener el foco en el buscador tras re-render.
+    const input = container.querySelector('.player-search-input');
+    if (input && query) { input.focus(); input.setSelectionRange(query.length, query.length); }
+}
+
+function addMatchPlayer(studentId) {
+    if (appState.matchTempPlayers.length >= 4) return;
+    if (!appState.matchTempPlayers.includes(studentId)) {
+        appState.matchTempPlayers.push(studentId);
+    }
+    renderMatchPlayersSelector();
+}
+
+function removeMatchPlayer(studentId) {
+    appState.matchTempPlayers = appState.matchTempPlayers.filter(id => id !== studentId);
+    renderMatchPlayersSelector();
+}
+
+async function submitMatch() {
+    const matchDate = document.getElementById('matchDate').value;
+    const startTime = document.getElementById('matchTime').value;
+    const matchType = document.getElementById('matchType').value;
+    const levelMin = parseFloat(document.getElementById('matchLevelMin').value);
+    const levelMax = parseFloat(document.getElementById('matchLevelMax').value);
+
+    if (!matchDate || !startTime) {
+        showToast('Indica fecha y hora del partido', 'error');
+        return;
+    }
+    if (isNaN(levelMin) || isNaN(levelMax) || levelMin > levelMax) {
+        showToast('Rango de nivel no válido', 'error');
+        return;
+    }
+
+    try {
+        const created = await db.createMatch({
+            matchDate,
+            startTime,
+            matchType,
+            levelMin,
+            levelMax,
+            players: appState.matchTempPlayers,
+        });
+        appState.matches.push(db.convertMatchFromDB(created));
+        appState.matches.sort((a, b) =>
+            (a.matchDate + a.startTime).localeCompare(b.matchDate + b.startTime));
+        closeModal('matchModal');
+        renderMatchesList();
+        showToast('Partido creado', 'success');
+    } catch (e) {
+        showToast('Error al crear el partido', 'error');
+    }
+}
+
+// --- Registrar resultado y actualizar nivel --------------------------------
+
+function openMatchResultModal(matchId) {
+    const match = appState.matches.find(m => m.id === matchId);
+    if (!match) return;
+
+    const teamA = [match.players[0], match.players[1]].filter(Boolean);
+    const teamB = [match.players[2], match.players[3]].filter(Boolean);
+
+    if (teamA.length < 2 || teamB.length < 2) {
+        showToast('El partido necesita 4 jugadores para registrar el resultado', 'error');
+        return;
+    }
+
+    const teamHtml = (team, letter) => {
+        const names = team.map(id => {
+            const s = getStudentById(id);
+            return `${escapeHtml(s ? s.name : 'Alumno')} <span class="match-level-badge sm">${escapeHtml(formatLevel(s ? s.level : null))}</span>`;
+        }).join(' · ');
+        return `
+        <button class="match-result-team-btn" onclick="registerMatchResult('${escapeHtml(matchId)}', '${letter}')">
+            <span class="match-result-team-label">Pareja ${letter}</span>
+            <span class="match-result-team-players">${names}</span>
+            <span class="match-result-win">Ganó esta pareja →</span>
+        </button>`;
+    };
+
+    document.getElementById('matchResultTeams').innerHTML = teamHtml(teamA, 'A') + teamHtml(teamB, 'B');
+    openModal('matchResultModal');
+}
+
+async function registerMatchResult(matchId, winner) {
+    const match = appState.matches.find(m => m.id === matchId);
+    if (!match) return;
+
+    // Jugadores de la pareja ganadora: índices 0-1 (A) o 2-3 (B).
+    const winnerIds = winner === 'A'
+        ? [match.players[0], match.players[1]]
+        : [match.players[2], match.players[3]];
+
+    try {
+        // +0.1 al nivel de cada jugador ganador, persistiendo en students.level.
+        for (const id of winnerIds.filter(Boolean)) {
+            const student = getStudentById(id);
+            if (!student) continue;
+            const current = (student.level === null || student.level === undefined || isNaN(student.level))
+                ? 0 : Number(student.level);
+            const newLevel = Math.round((current + 0.1) * 10) / 10; // evita errores de coma flotante
+            await db.updateStudent(id, { level: newLevel });
+            student.level = newLevel; // actualizar estado local sin recargar
+        }
+
+        const updated = await db.updateMatch(matchId, { winner, isCompleted: true });
+        const idx = appState.matches.findIndex(m => m.id === matchId);
+        if (idx !== -1) appState.matches[idx] = db.convertMatchFromDB(updated);
+
+        closeModal('matchResultModal');
+        renderMatchesList();
+        showToast('Resultado registrado · niveles actualizados', 'success');
+    } catch (e) {
+        console.error('Error registrando resultado:', e);
+        showToast('Error al registrar el resultado', 'error');
+    }
+}
+
+function confirmDeleteMatch(matchId) {
+    const match = appState.matches.find(m => m.id === matchId);
+    if (!match) return;
+    if (!confirm('¿Eliminar este partido?')) return;
+    db.deleteMatch(matchId)
+        .then(() => {
+            appState.matches = appState.matches.filter(m => m.id !== matchId);
+            renderMatchesList();
+            showToast('Partido eliminado', 'success');
+        })
+        .catch(() => showToast('Error al eliminar el partido', 'error'));
 }
 
 function viewMonitorClasses(monitorId) {
