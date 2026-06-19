@@ -2984,6 +2984,17 @@ form {
     background: white;
 }
 
+.player-result-guest {
+    color: var(--primary-green-dark);
+    font-style: italic;
+    border-top: 1px dashed var(--gray-200);
+    margin-top: 2px;
+    padding-top: 6px;
+}
+.player-result-guest:hover {
+    background: #f0f8ff;
+}
+
 /* Modal de resultado */
 .match-result-teams {
     display: flex;
@@ -3140,3 +3151,610 @@ form {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* ==========================================
+   TORNEOS
+   ========================================== */
+
+.tournaments-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.tournament-card {
+    background: white;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--gray-100);
+    padding: var(--spacing-lg);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.tournament-card-name {
+    font-size: var(--font-size-lg);
+    font-weight: 700;
+    color: var(--gray-900);
+    margin-bottom: var(--spacing-xs);
+}
+
+.tournament-card-meta {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+.t-chip {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--gray-100);
+    color: var(--gray-700);
+}
+
+.t-chip-status { color: white; }
+.t-status-setup { background: var(--gray-400); }
+.t-status-active { background: var(--secondary-blue); }
+.t-status-finished { background: var(--primary-green); }
+
+.tournament-card-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+/* Detalle del torneo */
+.t-detail-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+    flex-wrap: wrap;
+}
+
+.t-detail-title {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    color: var(--gray-900);
+    margin: 0;
+}
+
+.t-champion {
+    font-weight: 700;
+    color: var(--primary-green-dark);
+    background: #ecfdf5;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: var(--font-size-sm);
+}
+
+.t-section-title {
+    font-size: var(--font-size-lg);
+    font-weight: 700;
+    color: var(--gray-800);
+    margin: var(--spacing-lg) 0 var(--spacing-md);
+    padding-bottom: var(--spacing-xs);
+    border-bottom: 2px solid var(--gray-100);
+}
+
+/* Grupos */
+#tGroups {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--spacing-lg);
+}
+
+.t-group {
+    background: white;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--gray-100);
+    padding: var(--spacing-lg);
+}
+
+.t-group-title {
+    font-size: var(--font-size-base);
+    font-weight: 700;
+    color: var(--gray-900);
+    margin-bottom: var(--spacing-sm);
+}
+
+.t-standings {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: var(--spacing-md);
+    font-size: var(--font-size-sm);
+}
+
+.t-standings th,
+.t-standings td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--gray-100);
+    text-align: left;
+}
+
+.t-standings th {
+    color: var(--gray-500);
+    font-weight: 600;
+    font-size: var(--font-size-xs);
+}
+
+.t-standings .t-qualified {
+    background: #ecfdf5;
+    font-weight: 600;
+}
+
+.t-group-matches {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+/* Partidos (grupo y cuadro) */
+.t-match {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    background: var(--gray-50);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+}
+
+.t-match-pair {
+    flex: 1;
+    color: var(--gray-800);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.t-match-pair.t-match-win {
+    font-weight: 700;
+    color: var(--primary-green-dark);
+}
+
+.t-match-vs {
+    font-size: var(--font-size-xs);
+    color: var(--gray-400);
+    font-weight: 700;
+}
+
+.t-match-done { color: var(--primary-green); font-weight: 700; }
+.t-match-pending { color: var(--gray-300); }
+
+.btn-xs {
+    padding: 2px 10px;
+    font-size: var(--font-size-xs);
+}
+
+/* Cuadro de eliminatoria: columnas por ronda */
+.t-bracket {
+    display: flex;
+    gap: var(--spacing-lg);
+    overflow-x: auto;
+    padding-bottom: var(--spacing-md);
+}
+
+.t-round {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    gap: var(--spacing-md);
+    min-width: 240px;
+}
+
+.t-round-title {
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    color: var(--gray-600);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    text-align: center;
+}
+
+.t-round .t-match {
+    background: white;
+    border: 1px solid var(--gray-200);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+}
+
+.t-round .t-match-vs { align-self: center; }
+
+/* Selector de parejas en el modal de creación */
+.t-pairs-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    margin-bottom: var(--spacing-sm);
+}
+
+.t-pair-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+}
+
+.t-pair-idx {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--secondary-blue);
+    color: white;
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.t-pair-names { flex: 1; font-weight: 600; color: var(--gray-800); }
+
+.t-buffer {
+    margin-bottom: var(--spacing-sm);
+}
+
+.t-pairs-count {
+    margin-top: var(--spacing-sm);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--gray-500);
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    color: var(--gray-700);
+}
+.checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--primary-green);
+}
+
+/* ==========================================
+   CAJA — arqueo diario
+   ========================================== */
+.caja-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: var(--spacing-lg);
+}
+.caja-dates, .caja-filters, .caja-quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    align-items: flex-end;
+}
+.caja-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.caja-field label {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--gray-500);
+}
+.caja-field input,
+.caja-filters select {
+    padding: var(--spacing-sm);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+}
+
+.caja-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+}
+.caja-card {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.caja-card-total {
+    background: var(--primary-green);
+    border-color: var(--primary-green-dark);
+    color: white;
+}
+.caja-card-label {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    opacity: 0.85;
+}
+.caja-card-value {
+    font-size: var(--font-size-xl);
+    font-weight: 800;
+}
+.caja-card-sub {
+    font-size: var(--font-size-xs);
+    color: var(--gray-500);
+}
+.caja-card-total .caja-card-sub { color: rgba(255,255,255,0.9); }
+.caja-card-types { gap: 2px; }
+
+.caja-reconcile {
+    margin-bottom: var(--spacing-lg);
+}
+.caja-reconcile-box {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+}
+.caja-reconcile-title {
+    display: block;
+    font-weight: 700;
+    margin-bottom: var(--spacing-sm);
+}
+.caja-reconcile-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+    align-items: center;
+}
+.caja-reconcile-input {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: var(--font-size-sm);
+}
+.caja-reconcile-input input {
+    width: 110px;
+    padding: var(--spacing-sm);
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-md);
+}
+.caja-diff {
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: var(--radius-md);
+}
+.caja-diff-ok    { background: var(--status-full-light); color: #14532d; }
+.caja-diff-over  { background: var(--status-partial-light); color: #7c2d12; }
+.caja-diff-under { background: #fecaca; color: #7f1d1d; }
+
+.caja-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    font-size: var(--font-size-sm);
+}
+.caja-table th,
+.caja-table td {
+    padding: var(--spacing-sm) var(--spacing-md);
+    text-align: left;
+    border-bottom: 1px solid var(--gray-100);
+}
+.caja-table thead th {
+    background: var(--gray-50);
+    font-weight: 700;
+    color: var(--gray-700);
+}
+.caja-table tfoot td {
+    font-weight: 800;
+    background: var(--gray-50);
+}
+.caja-amount { text-align: right; font-weight: 700; }
+.caja-type-badge {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+.caja-type-badge.class   { background: #dbeafe; color: #1e3a8a; }
+.caja-type-badge.monthly { background: #dcfce7; color: #14532d; }
+
+/* ==========================================
+   CALENDARIO DE PARTIDOS POR PISTAS
+   ========================================== */
+.matches-view-toggle {
+    display: inline-flex;
+    gap: 4px;
+    margin-left: auto;
+    background: var(--gray-100);
+    padding: 3px;
+    border-radius: var(--radius-md);
+}
+
+/* La vista de calendario rompe el ancho de 860px de .recepcion-inner y ocupa
+   todo el ancho del fondo gris. Los márgenes negativos los fija JS
+   (applyCalendarFullWidth) según el ancho real del panel. */
+#matchesCalendarView {
+    box-sizing: border-box;
+}
+.matches-view-btn {
+    border: none;
+    background: transparent;
+    padding: 6px 14px;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--gray-700);
+}
+.matches-view-btn.active {
+    background: white;
+    color: var(--primary-green-dark);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.cal-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-md);
+}
+.cal-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+.cal-nav input[type="date"] {
+    padding: var(--spacing-sm);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+}
+.cal-courts-config {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: var(--font-size-sm);
+    color: var(--gray-700);
+}
+.cal-courts-config input {
+    width: 64px;
+    padding: var(--spacing-sm);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+}
+
+.cal-unassigned {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    align-items: center;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    font-size: var(--font-size-sm);
+}
+.cal-unassigned-label { font-weight: 700; color: #9a3412; }
+.cal-unassigned-chip {
+    background: white;
+    border: 1px solid #fed7aa;
+    border-radius: 999px;
+    padding: 2px 10px;
+}
+
+/* Contenedor con scroll horizontal para muchas pistas */
+.matches-calendar {
+    overflow-x: auto;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    background: white;
+}
+.cal-grid {
+    min-width: max-content;
+}
+.cal-head-row {
+    display: grid;
+    min-width: max-content;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+.cal-body-row {
+    display: grid;
+    min-width: max-content;
+}
+.cal-corner {
+    background: var(--gray-50);
+    border-bottom: 2px solid var(--gray-200);
+    border-right: 1px solid var(--gray-200);
+    position: sticky;
+    left: 0;
+    z-index: 6;
+}
+.cal-court-head {
+    background: var(--primary-green);
+    color: white;
+    font-weight: 700;
+    font-size: var(--font-size-sm);
+    text-align: center;
+    padding: 8px 4px;
+    border-right: 1px solid rgba(255,255,255,0.2);
+    border-bottom: 2px solid var(--primary-green-dark);
+}
+.cal-times {
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    background: var(--gray-50);
+    border-right: 1px solid var(--gray-200);
+}
+.cal-time-label {
+    font-size: var(--font-size-xs);
+    color: var(--gray-500);
+    text-align: right;
+    padding-right: 6px;
+    box-sizing: border-box;
+    transform: translateY(-7px); /* alinear etiqueta con la línea de la hora */
+}
+.cal-time-label.on-hour { color: var(--gray-700); font-weight: 600; }
+
+.cal-court-col {
+    position: relative;
+    border-right: 1px solid var(--gray-100);
+}
+.cal-slot {
+    box-sizing: border-box;
+    border-bottom: 1px dashed var(--gray-100);
+}
+.cal-slot.on-hour { border-bottom: 1px solid var(--gray-200); }
+
+.cal-block {
+    position: absolute;
+    left: 3px;
+    right: 3px;
+    box-sizing: border-box;
+    border-radius: var(--radius-md);
+    padding: 4px 6px;
+    overflow: hidden;
+    cursor: grab;
+    color: white;
+    font-size: var(--font-size-xs);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    transition: filter 0.15s;
+    touch-action: none;       /* permite arrastrar con el dedo sin hacer scroll */
+    user-select: none;
+}
+.cal-block:hover { filter: brightness(1.05); }
+.cal-block-dragging {
+    cursor: grabbing;
+    opacity: 0.85;
+    z-index: 20;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+    transition: none;
+}
+.cal-court-col { cursor: copy; }   /* doble clic en hueco = crear */
+.cal-court-col .cal-block { cursor: grab; }
+.cal-block-comp     { background: var(--primary-green); }
+.cal-block-friendly { background: var(--secondary-blue-light); }
+.cal-block-done     { background: var(--gray-500); }
+.cal-block-time { font-weight: 700; }
+.cal-block-players { opacity: 0.95; line-height: 1.2; }
+.cal-block-winner { font-weight: 700; margin-top: 2px; }

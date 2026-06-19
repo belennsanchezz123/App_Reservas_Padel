@@ -485,6 +485,25 @@ const db = {
         }
     },
 
+    // Pagos cobrados en un rango de fechas (por paid_date). from/to en formato
+    // 'YYYY-MM-DD' (ambos inclusive). Devuelve solo pagos con fecha de pago.
+    async getPaymentsByDateRange(from, to) {
+        try {
+            const { data, error } = await supabase
+                .from('student_payments')
+                .select('*')
+                .not('paid_date', 'is', null)
+                .gte('paid_date', from)
+                .lte('paid_date', to)
+                .order('created_at', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting payments by date range:', error);
+            throw error;
+        }
+    },
+
     async createPayment(payment) {
         try {
             const { data, error } = await supabase
@@ -588,6 +607,7 @@ const db = {
                     level_min: match.levelMin,
                     level_max: match.levelMax,
                     players: match.players || [],
+                    court: match.court || null,
                     comments: match.comments || null,
                 }])
                 .select()
@@ -610,6 +630,7 @@ const db = {
             if (updates.levelMin !== undefined) dbUpdates.level_min = updates.levelMin;
             if (updates.levelMax !== undefined) dbUpdates.level_max = updates.levelMax;
             if (updates.players !== undefined) dbUpdates.players = updates.players;
+            if (updates.court !== undefined) dbUpdates.court = updates.court;
             if (updates.winner !== undefined) dbUpdates.winner = updates.winner;
             if (updates.isCompleted !== undefined) dbUpdates.is_completed = updates.isCompleted;
             if (updates.comments !== undefined) dbUpdates.comments = updates.comments;
@@ -652,10 +673,239 @@ const db = {
             levelMin: m.level_min !== null && m.level_min !== undefined ? parseFloat(m.level_min) : null,
             levelMax: m.level_max !== null && m.level_max !== undefined ? parseFloat(m.level_max) : null,
             players: m.players || [],
+            court: m.court !== null && m.court !== undefined ? parseInt(m.court, 10) : null,
             winner: m.winner || null,
             isCompleted: m.is_completed || false,
             comments: m.comments || '',
             createdAt: m.created_at,
+        };
+    },
+
+    // ==========================================
+    // TORNEOS
+    // ==========================================
+
+    async getTournaments() {
+        try {
+            const { data, error } = await supabase
+                .from('tournaments')
+                .select('*')
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting tournaments:', error);
+            throw error;
+        }
+    },
+
+    async createTournament(t) {
+        try {
+            const { data, error } = await supabase
+                .from('tournaments')
+                .insert([{
+                    name: t.name,
+                    format: t.format,
+                    seeding: t.seeding,
+                    status: t.status || 'setup',
+                    num_pairs: t.numPairs || 0,
+                    num_groups: t.numGroups || 0,
+                    qualifiers_per_group: t.qualifiersPerGroup || 0,
+                    bracket_size: t.bracketSize || 0,
+                }])
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error creating tournament:', error);
+            throw error;
+        }
+    },
+
+    async updateTournament(id, updates) {
+        try {
+            const dbUpdates = {};
+            if (updates.name !== undefined) dbUpdates.name = updates.name;
+            if (updates.status !== undefined) dbUpdates.status = updates.status;
+            if (updates.numPairs !== undefined) dbUpdates.num_pairs = updates.numPairs;
+            if (updates.numGroups !== undefined) dbUpdates.num_groups = updates.numGroups;
+            if (updates.qualifiersPerGroup !== undefined) dbUpdates.qualifiers_per_group = updates.qualifiersPerGroup;
+            if (updates.bracketSize !== undefined) dbUpdates.bracket_size = updates.bracketSize;
+            if (updates.winnerPairId !== undefined) dbUpdates.winner_pair_id = updates.winnerPairId;
+            const { data, error } = await supabase
+                .from('tournaments').update(dbUpdates).eq('id', id).select().single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error updating tournament:', error);
+            throw error;
+        }
+    },
+
+    async deleteTournament(id) {
+        try {
+            // tournament_pairs y tournament_matches se borran en cascada (ON DELETE CASCADE).
+            const { error } = await supabase.from('tournaments').delete().eq('id', id);
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error deleting tournament:', error);
+            throw error;
+        }
+    },
+
+    async getTournamentPairs(tournamentId) {
+        try {
+            const { data, error } = await supabase
+                .from('tournament_pairs').select('*')
+                .eq('tournament_id', tournamentId)
+                .order('seed', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting tournament pairs:', error);
+            throw error;
+        }
+    },
+
+    // Inserta varias parejas de una vez (devuelve las filas con id).
+    async createTournamentPairs(pairs) {
+        try {
+            const rows = pairs.map(p => ({
+                tournament_id: p.tournamentId,
+                player1_id: p.player1Id,
+                player2_id: p.player2Id,
+                name: p.name || null,
+                seed: p.seed ?? null,
+                group_index: p.groupIndex ?? null,
+            }));
+            const { data, error } = await supabase.from('tournament_pairs').insert(rows).select();
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error creating tournament pairs:', error);
+            throw error;
+        }
+    },
+
+    async updateTournamentPair(id, updates) {
+        try {
+            const dbUpdates = {};
+            if (updates.seed !== undefined) dbUpdates.seed = updates.seed;
+            if (updates.groupIndex !== undefined) dbUpdates.group_index = updates.groupIndex;
+            const { data, error } = await supabase
+                .from('tournament_pairs').update(dbUpdates).eq('id', id).select().single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error updating tournament pair:', error);
+            throw error;
+        }
+    },
+
+    async getTournamentMatches(tournamentId) {
+        try {
+            const { data, error } = await supabase
+                .from('tournament_matches').select('*')
+                .eq('tournament_id', tournamentId)
+                .order('phase', { ascending: true })
+                .order('round', { ascending: true })
+                .order('slot', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting tournament matches:', error);
+            throw error;
+        }
+    },
+
+    async createTournamentMatches(matches) {
+        try {
+            const rows = matches.map(m => ({
+                tournament_id: m.tournamentId,
+                phase: m.phase,
+                group_index: m.groupIndex ?? null,
+                round: m.round || 0,
+                slot: m.slot || 0,
+                pair_a_id: m.pairAId || null,
+                pair_b_id: m.pairBId || null,
+                label_a: m.labelA || null,
+                label_b: m.labelB || null,
+            }));
+            const { data, error } = await supabase.from('tournament_matches').insert(rows).select();
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error creating tournament matches:', error);
+            throw error;
+        }
+    },
+
+    async updateTournamentMatch(id, updates) {
+        try {
+            const dbUpdates = {};
+            if (updates.pairAId !== undefined) dbUpdates.pair_a_id = updates.pairAId;
+            if (updates.pairBId !== undefined) dbUpdates.pair_b_id = updates.pairBId;
+            if (updates.winnerPairId !== undefined) dbUpdates.winner_pair_id = updates.winnerPairId;
+            if (updates.score !== undefined) dbUpdates.score = updates.score;
+            if (updates.labelA !== undefined) dbUpdates.label_a = updates.labelA;
+            if (updates.labelB !== undefined) dbUpdates.label_b = updates.labelB;
+            const { data, error } = await supabase
+                .from('tournament_matches').update(dbUpdates).eq('id', id).select().single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error updating tournament match:', error);
+            throw error;
+        }
+    },
+
+    convertTournamentFromDB(t) {
+        if (!t) return null;
+        return {
+            id: t.id,
+            name: t.name,
+            format: t.format,
+            seeding: t.seeding,
+            status: t.status,
+            numPairs: t.num_pairs,
+            numGroups: t.num_groups,
+            qualifiersPerGroup: t.qualifiers_per_group,
+            bracketSize: t.bracket_size,
+            winnerPairId: t.winner_pair_id || null,
+            createdAt: t.created_at,
+        };
+    },
+
+    convertTournamentPairFromDB(p) {
+        if (!p) return null;
+        return {
+            id: p.id,
+            tournamentId: p.tournament_id,
+            player1Id: p.player1_id,
+            player2Id: p.player2_id,
+            name: p.name || '',
+            seed: p.seed,
+            groupIndex: p.group_index,
+        };
+    },
+
+    convertTournamentMatchFromDB(m) {
+        if (!m) return null;
+        return {
+            id: m.id,
+            tournamentId: m.tournament_id,
+            phase: m.phase,
+            groupIndex: m.group_index,
+            round: m.round,
+            slot: m.slot,
+            pairAId: m.pair_a_id || null,
+            pairBId: m.pair_b_id || null,
+            labelA: m.label_a || null,
+            labelB: m.label_b || null,
+            winnerPairId: m.winner_pair_id || null,
+            score: m.score || null,
         };
     },
 };

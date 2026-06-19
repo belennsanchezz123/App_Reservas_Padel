@@ -97,12 +97,22 @@ En la app (`db.js.convertClassFromDB`) `start_at`/`end_at` se convierten a `star
 | level_min | numeric(3,1) (filtro de acceso al partido) |
 | level_max | numeric(3,1) (filtro de acceso al partido) |
 | players | uuid[] (hasta 4; `[0,1]`=Pareja A, `[2,3]`=Pareja B) |
+| court | int (nº de pista asignada, 1..N; null = sin asignar) |
 | winner | text (`A` / `B` / null) |
 | is_completed | boolean |
 | comments | text |
 | created_at | timestamptz |
 
-El nivel individual de cada jugador vive en `students.level` (numeric 0–5), **no** en `matches`. Al registrar resultado (`registerMatchResult` en `app.js`), los 2 jugadores de la pareja ganadora suman **+0.1** a `students.level`. `level_min`/`level_max` son solo el rango de acceso recomendado del partido. Migración SQL en `matches.sql`. La sección vive en una pestaña ("Partidos / Niveles") dentro del panel de Recepción.
+El nivel individual de cada jugador vive en `students.level` (numeric 0–5), **no** en `matches`. Al registrar resultado (`registerMatchResult` en `app.js`), los 2 jugadores de la pareja ganadora suman **+0.1** a `students.level`. `level_min`/`level_max` son solo el rango de acceso recomendado del partido. Migración SQL en `matches.sql`. La sección vive en una pestaña ("Partidos / Niveles") dentro del panel de Recepción, con dos vistas: **Lista** (tarjetas) y **Calendario** por pistas (`renderMatchesCalendar` en `app.js`). El calendario muestra una columna por pista (nº configurable vía `getNumCourts`/`setNumCourts`, persistido en `localStorage`), regla horaria cada 30 min y bloques de 1,5 h (`CONFIG.matchDurationMin`) posicionados por minutos. Al montar un partido se elige la pista; el filtro de jugadores del modal solo muestra alumnos dentro del rango de nivel.
+
+### tournaments / tournament_pairs / tournament_matches (torneos — Fase 1)
+Gestión de torneos en una pestaña ("Torneos") del panel de Recepción. Motor + UI en `tournaments.js` (cargado tras `app.js`); CRUD en `db.js`. Migración en `tournaments.sql`.
+
+- **tournaments**: `id` uuid, `name`, `format` (`elimination`/`round_robin`/`groups_elim`), `seeding` (`random`/`level`/`manual`), `status` (`setup`/`active`/`finished`), `num_pairs`, `num_groups`, `qualifiers_per_group`, `bracket_size`, `winner_pair_id`.
+- **tournament_pairs**: pareja = 2 alumnos (`player1_id`/`player2_id` = `students.id` TEXT), `seed`, `group_index`. Nivel de pareja para siembra `level` = suma de los dos `students.level`.
+- **tournament_matches**: `phase` (`group`/`bracket`), `group_index`, `round`, `slot`, `pair_a_id`, `pair_b_id`, `label_a`/`label_b` (huecos por clasificar), `winner_pair_id`, `score`.
+
+Motor (`tournaments.js`): `computeGroupPlan(n, format)` calcula grupos/clasificados para llegar a un cuadro potencia de 2 (2 clasificados/grupo, grupos ≥3 parejas); `bracketSeedOrder` genera el orden de cruces; al registrar resultado el ganador avanza solo (`advanceBracketWinner`) y, al cerrarse todos los grupos, se rellena la 1ª ronda del cuadro (`tryResolveGroups`). **Pendiente Fase 2**: colocación manual con drag & drop (hoy "manual" = orden de inscripción).
 
 ## Roles de usuario
 

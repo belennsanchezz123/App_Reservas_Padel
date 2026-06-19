@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestión de Clases de Pádel</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=17">
+    <link rel="stylesheet" href="styles.css?v=24">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -103,13 +103,54 @@
                 <!-- Pestañas: Pagos / Partidos / Categorías -->
                 <div class="recepcion-tabs" role="tablist">
                     <button class="recepcion-tab active" id="recepcionTabPagos" role="tab" onclick="switchRecepcionTab('pagos')">💳 Pagos</button>
+                    <button class="recepcion-tab" id="recepcionTabCaja" role="tab" onclick="switchRecepcionTab('caja')">💰 Caja</button>
                     <button class="recepcion-tab" id="recepcionTabPartidos" role="tab" onclick="switchRecepcionTab('partidos')">🎾 Partidos / Niveles</button>
                     <button class="recepcion-tab" id="recepcionTabCategorias" role="tab" onclick="switchRecepcionTab('categorias')">📊 Categorías</button>
+                    <button class="recepcion-tab" id="recepcionTabTorneos" role="tab" onclick="switchRecepcionTab('torneos')">🏆 Torneos</button>
                 </div>
 
                 <!-- Vista Pagos (existente) -->
                 <div id="recepcionPagosView">
                     <div id="recepcionStudentsList" class="recepcion-grid"></div>
+                </div>
+
+                <!-- Vista Caja (arqueo diario de pagos) -->
+                <div id="recepcionCajaView" style="display:none;">
+                    <div class="caja-toolbar">
+                        <div class="caja-dates">
+                            <div class="caja-field">
+                                <label for="cajaFrom">Desde</label>
+                                <input type="date" id="cajaFrom" onchange="renderCajaView()">
+                            </div>
+                            <div class="caja-field">
+                                <label for="cajaTo">Hasta</label>
+                                <input type="date" id="cajaTo" onchange="renderCajaView()">
+                            </div>
+                            <div class="caja-quick">
+                                <button class="btn btn-sm btn-secondary" onclick="setCajaRange('today')">Hoy</button>
+                                <button class="btn btn-sm btn-secondary" onclick="setCajaRange('yesterday')">Ayer</button>
+                                <button class="btn btn-sm btn-secondary" onclick="setCajaRange('week')">Esta semana</button>
+                                <button class="btn btn-sm btn-secondary" onclick="setCajaRange('month')">Este mes</button>
+                            </div>
+                        </div>
+                        <div class="caja-filters">
+                            <select id="cajaTypeFilter" onchange="renderCajaView()">
+                                <option value="all">Todos los tipos</option>
+                                <option value="monthly">Cuota mensual</option>
+                                <option value="class">Clase suelta</option>
+                            </select>
+                            <select id="cajaMethodFilter" onchange="renderCajaView()">
+                                <option value="all">Todos los métodos</option>
+                                <option value="efectivo">Efectivo</option>
+                                <option value="bizum">Bizum</option>
+                                <option value="transferencia">Transferencia</option>
+                            </select>
+                            <button class="btn btn-success btn-sm" onclick="exportCajaToExcel()">📊 Exportar a Excel</button>
+                        </div>
+                    </div>
+                    <div id="cajaSummary" class="caja-summary"></div>
+                    <div id="cajaReconcile" class="caja-reconcile"></div>
+                    <div id="cajaList" class="caja-list"></div>
                 </div>
 
                 <!-- Vista Partidos (nueva, estilo Playtomic) -->
@@ -118,8 +159,34 @@
                         <button class="btn btn-primary" onclick="openCreateMatchModal()">
                             <span class="btn-icon">+</span> Montar partido
                         </button>
+                        <div class="matches-view-toggle">
+                            <button class="matches-view-btn active" id="matchesViewListBtn" onclick="switchMatchesView('list')">📋 Lista</button>
+                            <button class="matches-view-btn" id="matchesViewCalBtn" onclick="switchMatchesView('calendar')">📅 Calendario</button>
+                        </div>
                     </div>
-                    <div id="matchesList" class="matches-list"></div>
+
+                    <!-- Sub-vista: lista de tarjetas -->
+                    <div id="matchesListView">
+                        <div id="matchesList" class="matches-list"></div>
+                    </div>
+
+                    <!-- Sub-vista: calendario por pistas -->
+                    <div id="matchesCalendarView" style="display:none;">
+                        <div class="cal-toolbar">
+                            <div class="cal-nav">
+                                <button class="btn btn-secondary btn-sm" onclick="shiftCalendarDay(-1)">◀</button>
+                                <input type="date" id="calendarDate" onchange="renderMatchesCalendar()">
+                                <button class="btn btn-secondary btn-sm" onclick="shiftCalendarDay(1)">▶</button>
+                                <button class="btn btn-secondary btn-sm" onclick="setCalendarToday()">Hoy</button>
+                            </div>
+                            <div class="cal-courts-config">
+                                <label for="numCourtsInput">Nº de pistas:</label>
+                                <input type="number" id="numCourtsInput" min="1" max="40" onchange="updateNumCourts(this.value)">
+                            </div>
+                        </div>
+                        <div id="matchesUnassigned" class="cal-unassigned"></div>
+                        <div id="matchesCalendar" class="matches-calendar"></div>
+                    </div>
                 </div>
 
                 <!-- Vista Categorías (agrupación de alumnos por nivel) -->
@@ -137,6 +204,21 @@
                         </select>
                     </div>
                     <div id="categoriasList" class="categorias-list"></div>
+                </div>
+
+                <!-- Vista Torneos -->
+                <div id="recepcionTorneosView" style="display:none;">
+                    <!-- Sub-vista: listado de torneos -->
+                    <div id="tournamentsListView">
+                        <div class="matches-toolbar">
+                            <button class="btn btn-primary" onclick="openCreateTournamentModal()">
+                                <span class="btn-icon">+</span> Nuevo torneo
+                            </button>
+                        </div>
+                        <div id="tournamentsList" class="tournaments-list"></div>
+                    </div>
+                    <!-- Sub-vista: detalle (grupos + cuadro) -->
+                    <div id="tournamentDetailView" style="display:none;"></div>
                 </div>
             </div>
         </section>
@@ -616,6 +698,45 @@
         </div>
     </div>
 
+    <!-- Modal: Editar pago -->
+    <div class="modal" id="editPaymentModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Editar pago</h3>
+                <button class="modal-close" onclick="closeModal('editPaymentModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Importe (€)</label>
+                        <input type="number" id="editPaymentAmount" min="0" step="0.5" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Método</label>
+                        <select id="editPaymentMethod">
+                            <option value="">—</option>
+                            <option value="efectivo">Efectivo</option>
+                            <option value="bizum">Bizum</option>
+                            <option value="transferencia">Transferencia</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Fecha de pago <span style="font-weight:400;color:#888">(vacío = pendiente)</span></label>
+                    <input type="date" id="editPaymentDate">
+                </div>
+                <div class="form-group">
+                    <label>Notas</label>
+                    <input type="text" id="editPaymentNotes" placeholder="Opcional">
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('editPaymentModal')">Cancelar</button>
+                <button class="btn btn-primary" onclick="saveEditPayment()">Guardar cambios</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Montar partido -->
     <div class="modal" id="matchModal">
         <div class="modal-content">
@@ -638,19 +759,25 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
+                        <label for="matchCourt">Pista</label>
+                        <select id="matchCourt">
+                            <!-- Opciones (1..N) inyectadas por JS -->
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label for="matchType">Tipo de partido</label>
                         <select id="matchType">
                             <option value="competitive">Competitivo</option>
                             <option value="friendly">Amistoso</option>
                         </select>
                     </div>
-                    <div class="form-group">
-                        <label>Rango de nivel</label>
-                        <div style="display:flex; gap:var(--spacing-sm); align-items:center;">
-                            <input type="number" id="matchLevelMin" step="0.1" min="0" max="5" value="0.5" style="flex:1;">
-                            <span>–</span>
-                            <input type="number" id="matchLevelMax" step="0.1" min="0" max="5" value="5.0" style="flex:1;">
-                        </div>
+                </div>
+                <div class="form-group">
+                    <label>Rango de nivel</label>
+                    <div style="display:flex; gap:var(--spacing-sm); align-items:center; max-width:240px;">
+                        <input type="number" id="matchLevelMin" step="0.1" min="0" max="7" value="0.5" style="flex:1;" oninput="renderMatchPlayersSelector()">
+                        <span>–</span>
+                        <input type="number" id="matchLevelMax" step="0.1" min="0" max="7" value="5.0" style="flex:1;" oninput="renderMatchPlayersSelector()">
                     </div>
                 </div>
                 <div class="form-group">
@@ -681,6 +808,67 @@
         </div>
     </div>
 
+    <!-- Modal: Crear torneo -->
+    <div class="modal" id="tournamentModal">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h3>Nuevo torneo</h3>
+                <button class="btn-close" onclick="closeModal('tournamentModal')">✕</button>
+            </div>
+            <form id="tournamentForm" onsubmit="event.preventDefault(); submitTournament();">
+                <div class="form-group">
+                    <label for="tournamentName">Nombre del torneo</label>
+                    <input type="text" id="tournamentName" placeholder="Ej: Torneo de primavera" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="tournamentFormat">Formato</label>
+                        <select id="tournamentFormat">
+                            <option value="elimination">Eliminatoria directa</option>
+                            <option value="groups_elim">Fase de grupos + eliminatoria</option>
+                            <option value="round_robin">Liguilla (todos contra todos)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="tournamentSeeding">Emparejamiento inicial</label>
+                        <select id="tournamentSeeding">
+                            <option value="random">Aleatorio</option>
+                            <option value="manual">Manual (orden de inscripción)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="tournamentSeedByLevel">
+                        Sembrar por nivel de los alumnos registrados (cabezas de serie)
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>Parejas inscritas (2 alumnos por pareja)</label>
+                    <div class="players-selector" id="tournamentPairsSelector"><!-- JS --></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('tournamentModal')">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Crear y generar cuadro</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Resultado de partido de torneo -->
+    <div class="modal" id="tournamentResultModal">
+        <div class="modal-content modal-compact">
+            <div class="modal-header">
+                <h3>Registrar resultado</h3>
+                <button class="btn-close" onclick="closeModal('tournamentResultModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>¿Qué pareja ganó el partido?</p>
+                <div id="tournamentResultTeams" class="match-result-teams"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
@@ -691,11 +879,13 @@
     <!-- 1. First load Supabase library from local node_modules -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
     <!-- 2. Then initialize Supabase client with detailed logging -->
-    <script src="supabase-init.js?v=17"></script>
+    <script src="supabase-init.js?v=24"></script>
     <!-- 3. Then load database layer -->
-    <script src="db.js?v=17"></script>
+    <script src="db.js?v=24"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=17"></script>
+    <script src="app.js?v=24"></script>
+    <!-- 5. Torneos (depende de app.js y db.js) -->
+    <script src="tournaments.js?v=24"></script>
 </body>
 
 </html>

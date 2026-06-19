@@ -25,6 +25,7 @@ create table if not exists public.matches (
     level_min     numeric(3,1) not null default 0.5,
     level_max     numeric(3,1) not null default 5.0,
     players       text[]      not null default '{}',
+    court         int,                                         -- nº de pista asignada (1..N), null = sin asignar
     winner        text,                                        -- 'A' | 'B' | null
     is_completed  boolean     not null default false,
     comments      text,
@@ -32,6 +33,9 @@ create table if not exists public.matches (
 );
 
 create index if not exists matches_match_date_idx on public.matches (match_date);
+
+-- Si la tabla matches ya existía sin la columna 'court', ejecutar esto una vez:
+alter table public.matches add column if not exists court int;
 
 -- Deshabilitar Row Level Security (igual que monitors/students/classes en este
 -- proyecto en "modo simple"). IMPORTANTE: solo para desarrollo/pruebas.

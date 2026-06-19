@@ -20,6 +20,10 @@ const appState = {
     matches: [],
     recepcionTab: 'pagos',
     matchTempPlayers: [],
+    cajaPayments: [],
+    cajaCounted: '',
+    matchesView: 'list',
+    calendarDate: null,
 };
 
 const CONFIG = {
@@ -29,7 +33,21 @@ const CONFIG = {
     days: ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'],
     // Snap interval in minutes when dragging/resizing classes (can be 15 or 30)
     snapMinutes: 15,
+    // Partidos: nº de pistas por defecto y duración fija de cada partido (min).
+    numCourts: 10,
+    matchDurationMin: 90,
 };
+
+// Nº de pistas configurable, persistido en el navegador (localStorage).
+function getNumCourts() {
+    const stored = parseInt(localStorage.getItem('padel_num_courts'), 10);
+    return (!isNaN(stored) && stored >= 1 && stored <= 40) ? stored : CONFIG.numCourts;
+}
+function setNumCourts(n) {
+    const v = Math.max(1, Math.min(40, parseInt(n, 10) || CONFIG.numCourts));
+    localStorage.setItem('padel_num_courts', String(v));
+    return v;
+}
 
 window.addEventListener('DOMContentLoaded', () => {
     const calendarGrid = document.getElementById('calendarGrid');
@@ -702,6 +720,9 @@ async function loadAllData() {
         appState.students = studentsData.map(s => db.convertStudentFromDB(s));
         appState.classes = classesData.map(c => db.convertClassFromDB(c));
         appState.matches = matchesData.map(m => db.convertMatchFromDB(m));
+
+        // Torneos (función definida en tournaments.js; tolera tabla inexistente).
+        if (typeof loadTournaments === 'function') await loadTournaments();
 
         console.log('✅ Datos cargados:', {
             monitors: appState.monitors.length,
@@ -1576,6 +1597,7 @@ function renderStudentPayments() {
                     <button class="pay-badge ${isPaid ? 'paid' : 'none'}" onclick="togglePaymentPaid('${p.id}')">
                         ${paidLabel}
                     </button>
+                    <button class="btn-icon-sm" onclick="openEditPaymentModal('${p.id}')" title="Editar">✏️</button>
                     <button class="btn-icon-sm btn-danger-sm" onclick="deleteStudentPayment('${p.id}')" title="Eliminar">🗑️</button>
                 </div>
             </div>
@@ -1766,6 +1788,47 @@ async function togglePaymentPaid(paymentId) {
         showToast(newPaidDate ? 'Marcado como pagado' : 'Marcado como pendiente', 'success');
     } catch (e) {
         showToast('Error al actualizar el pago', 'error');
+    }
+}
+
+function openEditPaymentModal(paymentId) {
+    const payment = appState.studentPayments.find(p => p.id === paymentId);
+    if (!payment) return;
+    appState.editingPaymentId = paymentId;
+    document.getElementById('editPaymentAmount').value = payment.amount !== null ? payment.amount : '';
+    document.getElementById('editPaymentMethod').value = payment.method || '';
+    document.getElementById('editPaymentDate').value = payment.paidDate || '';
+    document.getElementById('editPaymentNotes').value = payment.notes || '';
+    openModal('editPaymentModal');
+}
+
+async function saveEditPayment() {
+    const paymentId = appState.editingPaymentId;
+    if (!paymentId) return;
+    const payment = appState.studentPayments.find(p => p.id === paymentId);
+    if (!payment) return;
+
+    const amount = document.getElementById('editPaymentAmount').value;
+    const method = document.getElementById('editPaymentMethod').value;
+    const paidDate = document.getElementById('editPaymentDate').value || null;
+    const notes = document.getElementById('editPaymentNotes').value.trim();
+
+    try {
+        await db.updatePayment(paymentId, {
+            amount: amount !== '' ? parseFloat(amount) : null,
+            method: method || null,
+            paidDate,
+            notes: notes || null,
+        });
+        payment.amount = amount !== '' ? parseFloat(amount) : null;
+        payment.method = method || null;
+        payment.paidDate = paidDate;
+        payment.notes = notes || null;
+        closeModal('editPaymentModal');
+        renderStudentPayments();
+        showToast('Pago actualizado', 'success');
+    } catch (e) {
+        showToast('Error al guardar el pago', 'error');
     }
 }
 
@@ -3210,21 +3273,287 @@ function switchRecepcionTab(tab) {
 
     // Mostrar solo la vista activa.
     document.getElementById('recepcionPagosView').style.display = tab === 'pagos' ? '' : 'none';
+    document.getElementById('recepcionCajaView').style.display = tab === 'caja' ? '' : 'none';
     document.getElementById('recepcionPartidosView').style.display = tab === 'partidos' ? '' : 'none';
     document.getElementById('recepcionCategoriasView').style.display = tab === 'categorias' ? '' : 'none';
+    document.getElementById('recepcionTorneosView').style.display = tab === 'torneos' ? '' : 'none';
 
     // Resaltar la pestaña activa.
     document.getElementById('recepcionTabPagos').classList.toggle('active', tab === 'pagos');
+    document.getElementById('recepcionTabCaja').classList.toggle('active', tab === 'caja');
     document.getElementById('recepcionTabPartidos').classList.toggle('active', tab === 'partidos');
     document.getElementById('recepcionTabCategorias').classList.toggle('active', tab === 'categorias');
+    document.getElementById('recepcionTabTorneos').classList.toggle('active', tab === 'torneos');
 
     // El buscador de alumnos solo aplica a la vista de pagos.
     const searchWrap = document.getElementById('recepcionSearchWrap');
     if (searchWrap) searchWrap.style.visibility = tab === 'pagos' ? 'visible' : 'hidden';
 
     if (tab === 'pagos') renderRecepcionStudentsList();
-    else if (tab === 'partidos') renderMatchesList();
+    else if (tab === 'caja') openCajaView();
+    else if (tab === 'partidos') renderMatchesArea();
     else if (tab === 'categorias') renderCategoriasView();
+    else if (tab === 'torneos') { backToTournamentsList(); }
+}
+
+// ==========================================
+// CAJA — arqueo diario de pagos cobrados
+// ==========================================
+
+// Fecha local en formato YYYY-MM-DD (sin desfase de zona horaria).
+function localDateStr(d) {
+    return d.toLocaleDateString('sv'); // 'sv' -> YYYY-MM-DD
+}
+
+// Inicializa el rango (hoy por defecto) y carga los pagos.
+function openCajaView() {
+    const fromEl = document.getElementById('cajaFrom');
+    const toEl = document.getElementById('cajaTo');
+    if (!fromEl.value || !toEl.value) {
+        const today = localDateStr(new Date());
+        fromEl.value = today;
+        toEl.value = today;
+    }
+    loadCajaPayments();
+}
+
+// Ajusta el rango con los botones rápidos.
+function setCajaRange(preset) {
+    const now = new Date();
+    let from, to;
+    if (preset === 'today') {
+        from = to = new Date(now);
+    } else if (preset === 'yesterday') {
+        from = to = new Date(now.getTime() - 86400000);
+    } else if (preset === 'week') {
+        // Lunes a domingo de la semana actual.
+        const dow = (now.getDay() + 6) % 7; // 0 = lunes
+        from = new Date(now.getTime() - dow * 86400000);
+        to = new Date(from.getTime() + 6 * 86400000);
+    } else if (preset === 'month') {
+        from = new Date(now.getFullYear(), now.getMonth(), 1);
+        to = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    }
+    document.getElementById('cajaFrom').value = localDateStr(from);
+    document.getElementById('cajaTo').value = localDateStr(to);
+    loadCajaPayments();
+}
+
+async function loadCajaPayments() {
+    let from = document.getElementById('cajaFrom').value;
+    let to = document.getElementById('cajaTo').value;
+    if (!from || !to) return;
+    if (from > to) { [from, to] = [to, from]; } // por si se invierten
+
+    const listEl = document.getElementById('cajaList');
+    listEl.innerHTML = '<p class="profile-loading">Cargando pagos...</p>';
+    try {
+        const data = await db.getPaymentsByDateRange(from, to);
+        appState.cajaPayments = data.map(p => db.convertPaymentFromDB(p));
+    } catch (e) {
+        console.error('Error cargando caja:', e);
+        appState.cajaPayments = [];
+        listEl.innerHTML = '<p class="profile-empty">Error al cargar los pagos.</p>';
+        return;
+    }
+    renderCajaView();
+}
+
+// Devuelve los pagos de caja aplicando los filtros de tipo y método.
+function getFilteredCajaPayments() {
+    const typeFilter = document.getElementById('cajaTypeFilter')?.value || 'all';
+    const methodFilter = document.getElementById('cajaMethodFilter')?.value || 'all';
+    return appState.cajaPayments.filter(p => {
+        const type = p.classId ? 'class' : 'monthly';
+        if (typeFilter !== 'all' && type !== typeFilter) return false;
+        if (methodFilter !== 'all' && (p.method || '') !== methodFilter) return false;
+        return true;
+    });
+}
+
+// Concepto legible de un pago (clase suelta o cuota del mes).
+function cajaConcept(p) {
+    if (p.classId) {
+        const cls = getClassById(p.classId);
+        return cls ? `Clase ${cls.date} ${cls.startTime || ''}`.trim() : 'Clase suelta';
+    }
+    return p.period ? `Cuota ${formatPeriod(p.period)}` : 'Cuota mensual';
+}
+
+function studentName(studentId) {
+    const s = appState.students.find(x => x.id === studentId);
+    return s ? s.name : 'Alumno';
+}
+
+function renderCajaView() {
+    const payments = getFilteredCajaPayments();
+    const sumBy = (arr) => arr.reduce((s, p) => s + (p.amount || 0), 0);
+
+    const total = sumBy(payments);
+    const efectivo = sumBy(payments.filter(p => p.method === 'efectivo'));
+    const bizum = sumBy(payments.filter(p => p.method === 'bizum'));
+    const transfer = sumBy(payments.filter(p => p.method === 'transferencia'));
+    const otros = sumBy(payments.filter(p => !['efectivo', 'bizum', 'transferencia'].includes(p.method)));
+    const mensual = sumBy(payments.filter(p => !p.classId));
+    const clases = sumBy(payments.filter(p => p.classId));
+
+    const eur = n => `€${n.toFixed(2)}`;
+
+    // --- Tarjetas de totales ---
+    document.getElementById('cajaSummary').innerHTML = `
+        <div class="caja-card caja-card-total">
+            <span class="caja-card-label">Total recaudado</span>
+            <span class="caja-card-value">${eur(total)}</span>
+            <span class="caja-card-sub">${payments.length} pago${payments.length === 1 ? '' : 's'}</span>
+        </div>
+        <div class="caja-card">
+            <span class="caja-card-label">💵 Efectivo</span>
+            <span class="caja-card-value">${eur(efectivo)}</span>
+        </div>
+        <div class="caja-card">
+            <span class="caja-card-label">📱 Bizum</span>
+            <span class="caja-card-value">${eur(bizum)}</span>
+        </div>
+        <div class="caja-card">
+            <span class="caja-card-label">🏦 Transferencia</span>
+            <span class="caja-card-value">${eur(transfer)}</span>
+        </div>
+        ${otros > 0 ? `<div class="caja-card">
+            <span class="caja-card-label">❓ Sin método</span>
+            <span class="caja-card-value">${eur(otros)}</span>
+        </div>` : ''}
+        <div class="caja-card caja-card-types">
+            <span class="caja-card-label">Por tipo</span>
+            <span class="caja-card-sub">Mensual: <strong>${eur(mensual)}</strong></span>
+            <span class="caja-card-sub">Clases sueltas: <strong>${eur(clases)}</strong></span>
+        </div>`;
+
+    // --- Cuadre de caja (solo efectivo) ---
+    const counted = parseFloat(appState.cajaCounted);
+    let diffHtml = '';
+    if (!isNaN(counted) && appState.cajaCounted !== '') {
+        const diff = counted - efectivo;
+        const cls = Math.abs(diff) < 0.005 ? 'ok' : (diff > 0 ? 'over' : 'under');
+        const label = cls === 'ok' ? '✅ Cuadra' : (diff > 0 ? `🔼 Sobra ${eur(Math.abs(diff))}` : `🔽 Falta ${eur(Math.abs(diff))}`);
+        diffHtml = `<span class="caja-diff caja-diff-${cls}">${label}</span>`;
+    }
+    document.getElementById('cajaReconcile').innerHTML = `
+        <div class="caja-reconcile-box">
+            <span class="caja-reconcile-title">🧮 Cuadre de caja (efectivo)</span>
+            <div class="caja-reconcile-row">
+                <span>Efectivo esperado: <strong>${eur(efectivo)}</strong></span>
+                <label class="caja-reconcile-input">Efectivo contado:
+                    <input type="number" min="0" step="0.5" placeholder="0.00"
+                        value="${escapeHtml(appState.cajaCounted)}"
+                        oninput="updateCajaCounted(this.value)">
+                </label>
+                ${diffHtml}
+            </div>
+        </div>`;
+
+    // --- Tabla de movimientos ---
+    const listEl = document.getElementById('cajaList');
+    if (payments.length === 0) {
+        listEl.innerHTML = '<p class="profile-empty">No hay pagos cobrados en este periodo.</p>';
+        return;
+    }
+    const methodLabel = m => ({ efectivo: '💵 Efectivo', bizum: '📱 Bizum', transferencia: '🏦 Transferencia' }[m] || '—');
+    const rows = payments.map(p => `
+        <tr>
+            <td>${escapeHtml(p.paidDate || '')}</td>
+            <td>${escapeHtml(studentName(p.studentId))}</td>
+            <td>${escapeHtml(cajaConcept(p))}</td>
+            <td><span class="caja-type-badge ${p.classId ? 'class' : 'monthly'}">${p.classId ? 'Clase' : 'Mensual'}</span></td>
+            <td>${methodLabel(p.method)}</td>
+            <td class="caja-amount">${p.amount !== null ? eur(p.amount) : '—'}</td>
+        </tr>`).join('');
+    listEl.innerHTML = `
+        <table class="caja-table">
+            <thead><tr><th>Fecha</th><th>Alumno</th><th>Concepto</th><th>Tipo</th><th>Método</th><th>Importe</th></tr></thead>
+            <tbody>${rows}</tbody>
+            <tfoot><tr><td colspan="5">Total</td><td class="caja-amount">${eur(total)}</td></tr></tfoot>
+        </table>`;
+}
+
+function updateCajaCounted(value) {
+    appState.cajaCounted = value;
+    renderCajaView();
+}
+
+async function exportCajaToExcel() {
+    const payments = getFilteredCajaPayments();
+    if (payments.length === 0) {
+        showToast('No hay pagos para exportar', 'warning');
+        return;
+    }
+    showLoading('Preparando exportación...');
+    const excelReady = await ensureExcelJS();
+    if (!excelReady) {
+        hideLoading();
+        showToast('No se pudo cargar la librería de Excel.', 'error');
+        return;
+    }
+
+    const from = document.getElementById('cajaFrom').value;
+    const to = document.getElementById('cajaTo').value;
+    const eur = n => Number((n || 0).toFixed(2));
+    const sumBy = (arr) => arr.reduce((s, p) => s + (p.amount || 0), 0);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Padel Pro Manager';
+    const sheet = workbook.addWorksheet('Caja');
+    sheet.columns = [
+        { header: 'Fecha', width: 14 },
+        { header: 'Alumno', width: 26 },
+        { header: 'Concepto', width: 26 },
+        { header: 'Tipo', width: 14 },
+        { header: 'Método', width: 16 },
+        { header: 'Importe (€)', width: 14 },
+    ];
+
+    // Título
+    const titleRow = sheet.addRow([`Caja ${from === to ? from : from + ' a ' + to}`]);
+    sheet.mergeCells(titleRow.number, 1, titleRow.number, 6);
+    styleCell(titleRow.getCell(1), { bgColor: EXCEL_COLORS.greenLight, fontColor: EXCEL_COLORS.greenDark, bold: true, fontSize: 13 });
+    titleRow.height = 22;
+
+    // Cabecera de columnas
+    const headRow = sheet.addRow(['Fecha', 'Alumno', 'Concepto', 'Tipo', 'Método', 'Importe (€)']);
+    headRow.eachCell(c => styleCell(c, { bgColor: EXCEL_COLORS.greenDark, fontColor: EXCEL_COLORS.white, bold: true }));
+
+    payments.forEach(p => {
+        sheet.addRow([
+            p.paidDate || '',
+            studentName(p.studentId),
+            cajaConcept(p),
+            p.classId ? 'Clase suelta' : 'Mensual',
+            p.method || '—',
+            eur(p.amount),
+        ]);
+    });
+
+    // Resumen
+    sheet.addRow([]);
+    const addSummary = (label, val) => {
+        const r = sheet.addRow(['', '', '', '', label, eur(val)]);
+        styleCell(r.getCell(5), { bold: true });
+        styleCell(r.getCell(6), { bold: true });
+    };
+    addSummary('Total', sumBy(payments));
+    addSummary('Efectivo', sumBy(payments.filter(p => p.method === 'efectivo')));
+    addSummary('Bizum', sumBy(payments.filter(p => p.method === 'bizum')));
+    addSummary('Transferencia', sumBy(payments.filter(p => p.method === 'transferencia')));
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Caja_${from}${from !== to ? '_a_' + to : ''}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    hideLoading();
+    showToast('Excel exportado correctamente', 'success');
 }
 
 // Categorías de nivel (límite inferior incluido, superior excluido).
@@ -3337,6 +3666,322 @@ function renderMatchesList() {
     };
 }
 
+// ==========================================
+// CALENDARIO DE PARTIDOS POR PISTAS
+// ==========================================
+
+// Punto de entrada de la pestaña Partidos: muestra lista o calendario.
+function renderMatchesArea() {
+    if (appState.matchesView === 'calendar') {
+        document.getElementById('matchesListView').style.display = 'none';
+        document.getElementById('matchesCalendarView').style.display = '';
+        document.getElementById('matchesViewListBtn').classList.remove('active');
+        document.getElementById('matchesViewCalBtn').classList.add('active');
+        if (!appState.calendarDate) appState.calendarDate = localDateStr(new Date());
+        document.getElementById('calendarDate').value = appState.calendarDate;
+        document.getElementById('numCourtsInput').value = getNumCourts();
+        applyCalendarFullWidth();
+        renderMatchesCalendar();
+    } else {
+        document.getElementById('matchesListView').style.display = '';
+        document.getElementById('matchesCalendarView').style.display = 'none';
+        document.getElementById('matchesViewListBtn').classList.add('active');
+        document.getElementById('matchesViewCalBtn').classList.remove('active');
+        renderMatchesList();
+    }
+}
+
+// Extiende la vista de calendario SOLO hacia la derecha, hasta el borde derecho
+// del fondo gris (.recepcion-dashboard). El margen izquierdo se mantiene alineado
+// con el resto del panel (.recepcion-inner, 860px).
+function applyCalendarFullWidth() {
+    const calView = document.getElementById('matchesCalendarView');
+    const inner = document.querySelector('.recepcion-inner');
+    const dash = document.getElementById('recepcionDashboard');
+    if (!calView || !inner || !dash) return;
+    const innerRect = inner.getBoundingClientRect();
+    const dashRect = dash.getBoundingClientRect();
+    const padR = parseFloat(getComputedStyle(dash).paddingRight);
+    const rightGap = (dashRect.right - padR) - innerRect.right;
+    calView.style.marginLeft = '0px';
+    calView.style.marginRight = `-${Math.max(0, rightGap)}px`;
+}
+
+// Recalcular el ancho del calendario al redimensionar la ventana.
+window.addEventListener('resize', () => {
+    if (appState.recepcionTab === 'partidos' && appState.matchesView === 'calendar') {
+        applyCalendarFullWidth();
+    }
+});
+
+function switchMatchesView(view) {
+    appState.matchesView = view;
+    renderMatchesArea();
+}
+
+function shiftCalendarDay(delta) {
+    const base = new Date(`${appState.calendarDate}T00:00:00`);
+    base.setDate(base.getDate() + delta);
+    appState.calendarDate = localDateStr(base);
+    document.getElementById('calendarDate').value = appState.calendarDate;
+    renderMatchesCalendar();
+}
+
+function setCalendarToday() {
+    appState.calendarDate = localDateStr(new Date());
+    document.getElementById('calendarDate').value = appState.calendarDate;
+    renderMatchesCalendar();
+}
+
+function updateNumCourts(value) {
+    setNumCourts(value);
+    document.getElementById('numCourtsInput').value = getNumCourts();
+    renderMatchesCalendar();
+}
+
+// Dibuja el calendario: columnas = pistas, filas cada 30 min, bloques de 1,5 h.
+function renderMatchesCalendar() {
+    const host = document.getElementById('matchesCalendar');
+    const unassignedHost = document.getElementById('matchesUnassigned');
+    if (!host) return;
+
+    appState.calendarDate = document.getElementById('calendarDate').value || appState.calendarDate;
+    const date = appState.calendarDate;
+    const numCourts = getNumCourts();
+
+    const dayStart = CONFIG.hoursStart * 60;       // min desde medianoche
+    const dayEnd = CONFIG.hoursEnd * 60;
+    const totalMin = dayEnd - dayStart;
+    const slotMin = 30;                            // regla de media en media hora
+    const slotPx = 30;                             // alto de cada media hora (px)
+    const pxPerMin = slotPx / slotMin;
+    const numSlots = Math.ceil(totalMin / slotMin);
+
+    const dayMatches = appState.matches.filter(m => m.matchDate === date);
+
+    // Partidos sin pista asignada -> tira superior.
+    const unassigned = dayMatches.filter(m => !m.court);
+    if (unassignedHost) {
+        if (unassigned.length) {
+            unassignedHost.innerHTML = `<span class="cal-unassigned-label">⚠️ Sin pista asignada:</span> ` +
+                unassigned.map(m => `<span class="cal-unassigned-chip" title="${escapeHtml(m.startTime)}">${escapeHtml(m.startTime)} · ${escapeHtml(matchCalLabel(m))}</span>`).join('');
+            unassignedHost.style.display = '';
+        } else {
+            unassignedHost.innerHTML = '';
+            unassignedHost.style.display = 'none';
+        }
+    }
+
+    // --- Regla de horas (columna izquierda) ---
+    let timeLabels = '';
+    for (let i = 0; i < numSlots; i++) {
+        const min = dayStart + i * slotMin;
+        const hh = String(Math.floor(min / 60)).padStart(2, '0');
+        const mm = String(min % 60).padStart(2, '0');
+        const onHour = (min % 60 === 0);
+        timeLabels += `<div class="cal-time-label ${onHour ? 'on-hour' : ''}" style="height:${slotPx}px">${onHour ? hh + ':' + mm : ''}</div>`;
+    }
+
+    // --- Cabecera de pistas ---
+    let headers = '<div class="cal-corner"></div>';
+    for (let c = 1; c <= numCourts; c++) {
+        headers += `<div class="cal-court-head">Pista ${c}</div>`;
+    }
+
+    // --- Columnas de pistas con líneas de fondo + bloques de partido ---
+    let columns = '';
+    for (let c = 1; c <= numCourts; c++) {
+        // Líneas de fondo (cada media hora).
+        let bg = '';
+        for (let i = 0; i < numSlots; i++) {
+            const min = dayStart + i * slotMin;
+            bg += `<div class="cal-slot ${min % 60 === 0 ? 'on-hour' : ''}" style="height:${slotPx}px"></div>`;
+        }
+        // Bloques de partido de esta pista.
+        const courtMatches = dayMatches.filter(m => m.court === c);
+        const blocks = courtMatches.map(m => {
+            const start = timeToMinutes(m.startTime);
+            const top = (start - dayStart) * pxPerMin;
+            const height = CONFIG.matchDurationMin * pxPerMin;
+            const endMin = start + CONFIG.matchDurationMin;
+            const endStr = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+            const cls = m.isCompleted ? 'cal-block-done' : (m.matchType === 'friendly' ? 'cal-block-friendly' : 'cal-block-comp');
+            return `
+                <div class="cal-block ${cls}" style="top:${top}px; height:${height}px"
+                     data-match-id="${escapeHtml(m.id)}"
+                     title="${escapeHtml(m.startTime)}–${endStr} · ${escapeHtml(matchCalLabel(m))} (arrastra para mover)">
+                    <div class="cal-block-time">${escapeHtml(m.startTime)}–${endStr}</div>
+                    <div class="cal-block-players">${escapeHtml(matchCalLabel(m))}</div>
+                    ${m.winner ? `<div class="cal-block-winner">🏆 ${escapeHtml(m.winner)}</div>` : ''}
+                </div>`;
+        }).join('');
+        columns += `<div class="cal-court-col" data-court="${c}">${bg}${blocks}</div>`;
+    }
+
+    const gridCols = `grid-template-columns: 56px repeat(${numCourts}, minmax(96px, 1fr));`;
+    host.innerHTML = `
+        <div class="cal-grid">
+            <div class="cal-head-row" style="${gridCols}">${headers}</div>
+            <div class="cal-body-row" style="${gridCols}">
+                <div class="cal-times">${timeLabels}</div>
+                ${columns}
+            </div>
+        </div>`;
+
+    // Guardar parámetros de geometría para los cálculos de arrastre/doble clic.
+    host._cal = { dayStart, dayEnd, slotPx, pxPerMin, durationMin: CONFIG.matchDurationMin };
+    attachCalendarInteractions(host);
+}
+
+// ==========================================
+// INTERACCIÓN DEL CALENDARIO: arrastrar bloques + doble clic en hueco
+// ==========================================
+
+// Snap de minutos a intervalos (15 min, coherente con el selector de hora).
+const CAL_SNAP_MIN = 15;
+function snapMinutes(min) {
+    return Math.round(min / CAL_SNAP_MIN) * CAL_SNAP_MIN;
+}
+function minutesToTime(min) {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+// Devuelve la columna de pista bajo unas coordenadas de pantalla (o null).
+function courtColAt(host, clientX, clientY) {
+    const cols = host.querySelectorAll('.cal-court-col');
+    for (const col of cols) {
+        const r = col.getBoundingClientRect();
+        if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+            return col;
+        }
+    }
+    return null;
+}
+
+// Calcula la hora (min desde medianoche, ya con snap y dentro de límites) a
+// partir de la Y del puntero relativa a una columna.
+function timeFromPointer(host, col, clientY) {
+    const { dayStart, dayEnd, pxPerMin, durationMin } = host._cal;
+    const r = col.getBoundingClientRect();
+    let min = dayStart + (clientY - r.top) / pxPerMin;
+    min = snapMinutes(min);
+    min = Math.max(dayStart, Math.min(min, dayEnd - durationMin)); // que quepa el partido
+    return min;
+}
+
+function attachCalendarInteractions(host) {
+    let drag = null; // { id, block, origCourt, moved }
+
+    host.onpointerdown = (e) => {
+        const block = e.target.closest('.cal-block');
+        if (!block) return;
+        e.preventDefault();
+        drag = {
+            id: block.dataset.matchId,
+            block,
+            startX: e.clientX,
+            startY: e.clientY,
+            moved: false,
+        };
+        block.classList.add('cal-block-dragging');
+        host.setPointerCapture(e.pointerId);
+    };
+
+    host.onpointermove = (e) => {
+        if (!drag) return;
+        if (!drag.moved && Math.abs(e.clientX - drag.startX) < 4 && Math.abs(e.clientY - drag.startY) < 4) return;
+        drag.moved = true;
+        const col = courtColAt(host, e.clientX, e.clientY);
+        if (!col) return;
+        // Reubicar el bloque en la columna destino y a la altura correspondiente.
+        if (drag.block.parentElement !== col) col.appendChild(drag.block);
+        const min = timeFromPointer(host, col, e.clientY);
+        const top = (min - host._cal.dayStart) * host._cal.pxPerMin;
+        drag.block.style.top = `${top}px`;
+    };
+
+    host.onpointerup = async (e) => {
+        if (!drag) return;
+        const d = drag; drag = null;
+        d.block.classList.remove('cal-block-dragging');
+        try { host.releasePointerCapture(e.pointerId); } catch (_) {}
+
+        if (!d.moved) {                       // fue un clic, no un arrastre
+            openMatchFromCalendar(d.id);
+            return;
+        }
+        const col = courtColAt(host, e.clientX, e.clientY) || d.block.parentElement;
+        const newCourt = parseInt(col.dataset.court, 10);
+        const newMin = timeFromPointer(host, col, e.clientY);
+        const newTime = minutesToTime(newMin);
+
+        const m = appState.matches.find(x => x.id === d.id);
+        if (!m) { renderMatchesCalendar(); return; }
+        if (m.court === newCourt && m.startTime === newTime) { renderMatchesCalendar(); return; }
+
+        // Aviso de solapamiento en la pista destino.
+        if (isCourtBusy(newCourt, m.matchDate, newTime, m.id)) {
+            if (!confirm(`La pista ${newCourt} ya tiene un partido que se solapa a las ${newTime}. ¿Mover de todos modos?`)) {
+                renderMatchesCalendar();
+                return;
+            }
+        }
+        try {
+            await db.updateMatch(d.id, { court: newCourt, startTime: newTime });
+            m.court = newCourt;
+            m.startTime = newTime;
+            appState.matches.sort((a, b) => (a.matchDate + a.startTime).localeCompare(b.matchDate + b.startTime));
+            renderMatchesCalendar();
+            showToast(`Movido a Pista ${newCourt} · ${newTime}`, 'success');
+        } catch (err) {
+            console.error('Error moviendo partido:', err);
+            showToast('Error al mover el partido', 'error');
+            renderMatchesCalendar();
+        }
+    };
+
+    // Doble clic en un hueco vacío -> montar partido con pista y hora prefijadas.
+    host.ondblclick = (e) => {
+        if (e.target.closest('.cal-block')) return;   // doble clic sobre un partido: ignorar
+        const col = e.target.closest('.cal-court-col');
+        if (!col) return;
+        const court = parseInt(col.dataset.court, 10);
+        const min = timeFromPointer(host, col, e.clientY);
+        openCreateMatchModal({ court, time: minutesToTime(min) });
+    };
+}
+
+// Etiqueta breve de un partido para el calendario (apellidos/primer nombre).
+function matchCalLabel(m) {
+    const names = (m.players || []).filter(Boolean).map(id => {
+        const s = getStudentById(id);
+        return s ? s.name.split(' ')[0] : 'Alumno';
+    });
+    if (!names.length) return 'Sin jugadores';
+    const a = names.slice(0, 2).join(' / ');
+    const b = names.slice(2, 4).join(' / ');
+    return b ? `${a} vs ${b}` : a;
+}
+
+// Al pulsar un bloque del calendario: registrar resultado si está completo,
+// o avisar de que faltan jugadores.
+function openMatchFromCalendar(matchId) {
+    const m = appState.matches.find(x => x.id === matchId);
+    if (!m) return;
+    const filled = (m.players || []).filter(Boolean).length;
+    if (m.isCompleted) {
+        showToast('Este partido ya tiene resultado registrado', 'info');
+        return;
+    }
+    if (filled === 4) {
+        openMatchResultModal(matchId);
+    } else {
+        showToast(`Faltan jugadores (${filled}/4) para registrar resultado`, 'warning');
+    }
+}
+
 // Construye una tarjeta de partido (cabecera + slots de jugadores).
 function buildMatchCard(match) {
     const slots = [];
@@ -3411,12 +4056,35 @@ function populateMatchTimeOptions() {
     select.innerHTML = html;
 }
 
-function openCreateMatchModal() {
+// Rellena el <select> de pistas (1..N). preselect opcional.
+function populateMatchCourtOptions(preselect) {
+    const select = document.getElementById('matchCourt');
+    if (!select) return;
+    const n = getNumCourts();
+    let html = '';
+    for (let c = 1; c <= n; c++) {
+        html += `<option value="${c}">Pista ${c}</option>`;
+    }
+    select.innerHTML = html;
+    if (preselect) select.value = String(preselect);
+}
+
+function openCreateMatchModal(prefill) {
+    // prefill puede ser un objeto { court, time } (desde el calendario) o el
+    // evento de un onclick (lo ignoramos).
+    const pre = (prefill && typeof prefill === 'object' && !prefill.target) ? prefill : null;
+
     document.getElementById('matchForm').reset();
     populateMatchTimeOptions();
+    populateMatchCourtOptions(pre && pre.court ? pre.court : 1);
     document.getElementById('matchLevelMin').value = '0.5';
     document.getElementById('matchLevelMax').value = '5.0';
     document.getElementById('matchType').value = 'competitive';
+    // Si venimos del calendario, prefijar la fecha mostrada.
+    if (appState.matchesView === 'calendar' && appState.calendarDate) {
+        document.getElementById('matchDate').value = appState.calendarDate;
+    }
+    if (pre && pre.time) document.getElementById('matchTime').value = pre.time;
     appState.matchTempPlayers = [];
     renderMatchPlayersSelector();
     openModal('matchModal');
@@ -3440,10 +4108,24 @@ function renderMatchPlayersSelector(query = '') {
         </span>`;
     }).join('');
 
+    // Rango de nivel: solo se muestran alumnos cuyo nivel esté dentro del rango.
+    const levelMin = parseFloat(document.getElementById('matchLevelMin').value);
+    const levelMax = parseFloat(document.getElementById('matchLevelMax').value);
+    const inLevelRange = (lvl) => {
+        const n = parseFloat(lvl);
+        if (isNaN(n)) return false;                       // sin nivel asignado -> fuera
+        if (!isNaN(levelMin) && n < levelMin) return false;
+        if (!isNaN(levelMax) && n > levelMax) return false;
+        return true;
+    };
+
     const full = selected.length >= 4;
     const q = query.toLowerCase();
-    const results = full ? [] : appState.students
-        .filter(s => s.active !== false && !selected.includes(s.id) && s.name.toLowerCase().includes(q))
+    const candidates = full ? [] : appState.students
+        .filter(s => s.active !== false && !selected.includes(s.id)
+            && s.name.toLowerCase().includes(q)
+            && inLevelRange(s.level));
+    const results = candidates
         .slice(0, 6)
         .map(s => `
             <div class="player-result" onclick="addMatchPlayer('${escapeHtml(s.id)}')">
@@ -3451,12 +4133,16 @@ function renderMatchPlayersSelector(query = '') {
                 <span class="match-level-badge sm">${escapeHtml(formatLevel(s.level))}</span>
             </div>`).join('');
 
+    const emptyMsg = candidates.length === 0
+        ? `<div class="players-hint">Ningún alumno con nivel entre ${escapeHtml(formatLevel(levelMin))} y ${escapeHtml(formatLevel(levelMax))}.</div>`
+        : '';
+
     container.innerHTML = `
         <div class="player-pills">${pills || '<span class="players-hint">Aún no hay jugadores.</span>'}</div>
         ${full
             ? '<div class="players-hint">Partido completo (4 jugadores).</div>'
             : `<input type="text" class="player-search-input" placeholder="Buscar alumno..." oninput="renderMatchPlayersSelector(this.value)" value="${escapeHtml(query)}">
-               <div class="player-results">${results || '<div class="players-hint">Sin resultados.</div>'}</div>`
+               <div class="player-results">${results || emptyMsg}</div>`
         }`;
 
     // Mantener el foco en el buscador tras re-render.
@@ -3483,6 +4169,7 @@ async function submitMatch() {
     const matchType = document.getElementById('matchType').value;
     const levelMin = parseFloat(document.getElementById('matchLevelMin').value);
     const levelMax = parseFloat(document.getElementById('matchLevelMax').value);
+    const court = parseInt(document.getElementById('matchCourt').value, 10) || null;
 
     if (!matchDate || !startTime) {
         showToast('Indica fecha y hora del partido', 'error');
@@ -3492,6 +4179,10 @@ async function submitMatch() {
         showToast('Rango de nivel no válido', 'error');
         return;
     }
+    // Aviso si la pista ya está ocupada en esa franja (solapamiento de 1,5 h).
+    if (court && isCourtBusy(court, matchDate, startTime)) {
+        if (!confirm(`La pista ${court} ya tiene un partido que se solapa a esa hora. ¿Crear de todos modos?`)) return;
+    }
 
     try {
         const created = await db.createMatch({
@@ -3500,17 +4191,39 @@ async function submitMatch() {
             matchType,
             levelMin,
             levelMax,
+            court,
             players: appState.matchTempPlayers,
         });
         appState.matches.push(db.convertMatchFromDB(created));
         appState.matches.sort((a, b) =>
             (a.matchDate + a.startTime).localeCompare(b.matchDate + b.startTime));
         closeModal('matchModal');
-        renderMatchesList();
+        if (appState.matchesView === 'calendar') renderMatchesCalendar();
+        else renderMatchesList();
         showToast('Partido creado', 'success');
     } catch (e) {
         showToast('Error al crear el partido', 'error');
     }
+}
+
+// ¿Hay ya un partido en esa pista/fecha cuyo intervalo de 1,5 h solapa con el nuevo?
+function isCourtBusy(court, date, startTime, ignoreId) {
+    const newStart = timeToMinutes(startTime);
+    const newEnd = newStart + CONFIG.matchDurationMin;
+    return appState.matches.some(m => {
+        if (m.id === ignoreId) return false;
+        if (m.court !== court || m.matchDate !== date) return false;
+        const s = timeToMinutes(m.startTime);
+        const e = s + CONFIG.matchDurationMin;
+        return newStart < e && s < newEnd; // se solapan
+    });
+}
+
+// "HH:MM" -> minutos desde medianoche.
+function timeToMinutes(t) {
+    if (!t) return 0;
+    const [h, m] = String(t).split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
 }
 
 // --- Registrar resultado y actualizar nivel --------------------------------
@@ -3570,7 +4283,7 @@ async function registerMatchResult(matchId, winner) {
         if (idx !== -1) appState.matches[idx] = db.convertMatchFromDB(updated);
 
         closeModal('matchResultModal');
-        renderMatchesList();
+        renderMatchesArea();
         showToast('Resultado registrado · niveles actualizados', 'success');
     } catch (e) {
         console.error('Error registrando resultado:', e);
@@ -3585,7 +4298,7 @@ function confirmDeleteMatch(matchId) {
     db.deleteMatch(matchId)
         .then(() => {
             appState.matches = appState.matches.filter(m => m.id !== matchId);
-            renderMatchesList();
+            renderMatchesArea();
             showToast('Partido eliminado', 'success');
         })
         .catch(() => showToast('Error al eliminar el partido', 'error'));
