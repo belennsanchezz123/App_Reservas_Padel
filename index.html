@@ -5,60 +5,36 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestión de Clases de Pádel</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
+    <link rel="stylesheet" href="styles.css?v=24">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 </head>
 
 
 <body>
 
-<div id="login-view" style="
-    height: 100vh;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background-color: #f0f2f5;
-">
-    <div style="
-        background: white;
-        padding: 2rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        width: 100%;
-        max-width: 400px;
-        text-align: center;
-    ">
-        <h1 style="color: #2c3e50; margin-bottom: 1.5rem;">🎾 PadelPro</h1>
-        <input type="email" id="email" placeholder="Correo electrónico" style="
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 10px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            box-sizing: border-box; 
-        ">
-        <input type="password" id="password" placeholder="Contraseña" style="
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 20px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            box-sizing: border-box;
-        ">
-        <button onclick="handleLogin()" style="
-            width: 100%;
-            padding: 12px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-        ">Entrar</button>
-        <p id="error-msg" style="color: red; margin-top: 10px; display: none;"></p>
+<div id="login-view" class="auth-screen">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <div class="auth-logo">🎾</div>
+            <h1>PadelPro Manager</h1>
+            <p>Gestión de clases y monitores de pádel</p>
+        </div>
+        <form class="auth-form" onsubmit="event.preventDefault(); handleLogin();">
+            <div class="auth-field">
+                <label for="email">Correo electrónico</label>
+                <input type="email" id="email" placeholder="nombre@club.com" autocomplete="username">
+            </div>
+            <div class="auth-field">
+                <label for="password">Contraseña</label>
+                <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+            </div>
+            <button type="submit" class="auth-submit">Iniciar sesión</button>
+            <p id="error-msg" class="auth-error"></p>
+        </form>
+        <p class="auth-footer">Acceso restringido a monitores y coordinación</p>
     </div>
 </div>
 
@@ -71,43 +47,16 @@
         <p class="loading-text">Cargando datos...</p>
     </div>
 
-    <!-- Login Screen -->
-    <div class="login-screen" id="loginScreen">
-        <div class="login-container">
-            <div class="login-header">
-                <div class="login-logo">🎾</div>
-                <h1>PadelPro Manager</h1>
-                <p>Selecciona tu rol para continuar</p>
-            </div>
-            <div class="login-roles">
-                <div class="role-card" onclick="login('coordinator')">
-                    <div class="role-icon">👔</div>
-                    <h2>Coordinador</h2>
-                    <p>Gestiona monitores y visualiza todas las clases</p>
-                </div>
-                <div class="role-card" onclick="showMonitorLogin()">
-                    <div class="role-icon">🎾</div>
-                    <h2>Monitor</h2>
-                    <p>Gestiona tus propias clases y alumnos</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Header -->
     <header class="header">
         <div class="header-content">
             <div class="logo-section">
                 <div class="logo-icon">🎾</div>
                 <h1 class="app-title">PadelPro Manager</h1>
-                <button class="btn-home" onclick="goHome()" title="Inicio">🏠</button>
+                <button class="btn-home" onclick="logout()" title="Cerrar sesión">🏠</button>
             </div>
             <div class="header-actions">
                 <span id="userDisplay" class="user-display"></span>
-                <button class="btn btn-secondary btn-sm" onclick="logout()">
-                    <span class="btn-icon">�</span>
-                    Cerrar Sesión
-                </button>
             </div>
         </div>
     </header>
@@ -131,6 +80,146 @@
             </div>
 <div class="monitors-grid" id="monitorsList">
                 <!-- Monitors will be injected here -->
+            </div>
+        </section>
+
+        <!-- Recepción Dashboard -->
+        <section id="recepcionDashboard" class="recepcion-dashboard" style="display: none;">
+            <div class="recepcion-inner">
+                <div class="recepcion-header">
+                    <div class="recepcion-title-group">
+                        <span class="recepcion-icon">🏢</span>
+                        <div>
+                            <h2 class="recepcion-title">Panel de Recepción</h2>
+                            <p class="recepcion-subtitle">Gestión de pagos de alumnos</p>
+                        </div>
+                    </div>
+                    <div class="recepcion-search-wrap" id="recepcionSearchWrap">
+                        <span class="recepcion-search-icon">🔍</span>
+                        <input type="text" id="recepcionStudentSearch" class="recepcion-search-input" placeholder="Buscar alumno..." oninput="renderRecepcionStudentsList()">
+                    </div>
+                </div>
+
+                <!-- Pestañas: Pagos / Partidos / Categorías -->
+                <div class="recepcion-tabs" role="tablist">
+                    <button class="recepcion-tab active" id="recepcionTabPagos" role="tab" onclick="switchRecepcionTab('pagos')">💳 Pagos</button>
+                    <button class="recepcion-tab" id="recepcionTabCaja" role="tab" onclick="switchRecepcionTab('caja')">💰 Caja</button>
+                    <button class="recepcion-tab" id="recepcionTabPartidos" role="tab" onclick="switchRecepcionTab('partidos')">🎾 Partidos / Niveles</button>
+                    <button class="recepcion-tab" id="recepcionTabCategorias" role="tab" onclick="switchRecepcionTab('categorias')">📊 Categorías</button>
+                    <button class="recepcion-tab" id="recepcionTabTorneos" role="tab" onclick="switchRecepcionTab('torneos')">🏆 Torneos</button>
+                </div>
+
+                <!-- Vista Pagos (existente) -->
+                <div id="recepcionPagosView">
+                    <div id="recepcionStudentsList" class="recepcion-grid"></div>
+                </div>
+
+                <!-- Vista Caja (arqueo diario de pagos) -->
+                <div id="recepcionCajaView" style="display:none;">
+                    <div class="caja-toolbar">
+                        <div class="caja-dates">
+                            <div class="caja-field">
+                                <label for="cajaFrom">Desde</label>
+                                <input type="date" id="cajaFrom" onchange="renderCajaView()">
+                            </div>
+                            <div class="caja-field">
+                                <label for="cajaTo">Hasta</label>
+                                <input type="date" id="cajaTo" onchange="renderCajaView()">
+                            </div>
+                            <div class="caja-quick">
+                                <button class="btn btn-sm btn-secondary" onclick="setCajaRange('today')">Hoy</button>
+                                <button class="btn btn-sm btn-secondary" onclick="setCajaRange('yesterday')">Ayer</button>
+                                <button class="btn btn-sm btn-secondary" onclick="setCajaRange('week')">Esta semana</button>
+                                <button class="btn btn-sm btn-secondary" onclick="setCajaRange('month')">Este mes</button>
+                            </div>
+                        </div>
+                        <div class="caja-filters">
+                            <select id="cajaTypeFilter" onchange="renderCajaView()">
+                                <option value="all">Todos los tipos</option>
+                                <option value="monthly">Cuota mensual</option>
+                                <option value="class">Clase suelta</option>
+                            </select>
+                            <select id="cajaMethodFilter" onchange="renderCajaView()">
+                                <option value="all">Todos los métodos</option>
+                                <option value="efectivo">Efectivo</option>
+                                <option value="bizum">Bizum</option>
+                                <option value="transferencia">Transferencia</option>
+                            </select>
+                            <button class="btn btn-success btn-sm" onclick="exportCajaToExcel()">📊 Exportar a Excel</button>
+                        </div>
+                    </div>
+                    <div id="cajaSummary" class="caja-summary"></div>
+                    <div id="cajaReconcile" class="caja-reconcile"></div>
+                    <div id="cajaList" class="caja-list"></div>
+                </div>
+
+                <!-- Vista Partidos (nueva, estilo Playtomic) -->
+                <div id="recepcionPartidosView" style="display:none;">
+                    <div class="matches-toolbar">
+                        <button class="btn btn-primary" onclick="openCreateMatchModal()">
+                            <span class="btn-icon">+</span> Montar partido
+                        </button>
+                        <div class="matches-view-toggle">
+                            <button class="matches-view-btn active" id="matchesViewListBtn" onclick="switchMatchesView('list')">📋 Lista</button>
+                            <button class="matches-view-btn" id="matchesViewCalBtn" onclick="switchMatchesView('calendar')">📅 Calendario</button>
+                        </div>
+                    </div>
+
+                    <!-- Sub-vista: lista de tarjetas -->
+                    <div id="matchesListView">
+                        <div id="matchesList" class="matches-list"></div>
+                    </div>
+
+                    <!-- Sub-vista: calendario por pistas -->
+                    <div id="matchesCalendarView" style="display:none;">
+                        <div class="cal-toolbar">
+                            <div class="cal-nav">
+                                <button class="btn btn-secondary btn-sm" onclick="shiftCalendarDay(-1)">◀</button>
+                                <input type="date" id="calendarDate" onchange="renderMatchesCalendar()">
+                                <button class="btn btn-secondary btn-sm" onclick="shiftCalendarDay(1)">▶</button>
+                                <button class="btn btn-secondary btn-sm" onclick="setCalendarToday()">Hoy</button>
+                            </div>
+                            <div class="cal-courts-config">
+                                <label for="numCourtsInput">Nº de pistas:</label>
+                                <input type="number" id="numCourtsInput" min="1" max="40" onchange="updateNumCourts(this.value)">
+                            </div>
+                        </div>
+                        <div id="matchesUnassigned" class="cal-unassigned"></div>
+                        <div id="matchesCalendar" class="matches-calendar"></div>
+                    </div>
+                </div>
+
+                <!-- Vista Categorías (agrupación de alumnos por nivel) -->
+                <div id="recepcionCategoriasView" style="display:none;">
+                    <div class="categorias-toolbar">
+                        <label for="categoriaFilter" class="categorias-filter-label">Filtrar por categoría:</label>
+                        <select id="categoriaFilter" class="categorias-filter-select" onchange="renderCategoriasView()">
+                            <option value="all">Todas las categorías</option>
+                            <option value="primera">Primera (≥ 5.5)</option>
+                            <option value="segunda">Segunda (4.5 – 5.5)</option>
+                            <option value="tercera">Tercera (3.5 – 4.5)</option>
+                            <option value="cuarta">Cuarta (2.5 – 3.5)</option>
+                            <option value="quinta">Quinta (&lt; 2.5)</option>
+                            <option value="sin">Sin clasificar</option>
+                        </select>
+                    </div>
+                    <div id="categoriasList" class="categorias-list"></div>
+                </div>
+
+                <!-- Vista Torneos -->
+                <div id="recepcionTorneosView" style="display:none;">
+                    <!-- Sub-vista: listado de torneos -->
+                    <div id="tournamentsListView">
+                        <div class="matches-toolbar">
+                            <button class="btn btn-primary" onclick="openCreateTournamentModal()">
+                                <span class="btn-icon">+</span> Nuevo torneo
+                            </button>
+                        </div>
+                        <div id="tournamentsList" class="tournaments-list"></div>
+                    </div>
+                    <!-- Sub-vista: detalle (grupos + cuadro) -->
+                    <div id="tournamentDetailView" style="display:none;"></div>
+                </div>
             </div>
         </section>
 
@@ -375,6 +464,12 @@
                     <label for="classComments">Comentarios</label>
                     <textarea id="classComments" rows="3" placeholder="Añade comentarios sobre la clase (opcional)"></textarea>
                 </div>
+                <div class="form-group recurring-section" id="recurringSection">
+                    <label class="recurring-toggle-label">
+                        <input type="checkbox" id="recurringEnabled">
+                        <span class="recurring-toggle-text">Clase recurrente (se repite cada semana)</span>
+                    </label>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" id="cancelClassBtn">Cancelar</button>
                     <button type="submit" class="btn btn-primary">Guardar Clase</button>
@@ -435,28 +530,61 @@
     </div>
 
     <!-- Modal: Monitor Login (Select Monitor) -->
-    <div class="modal" id="monitorLoginModal">
-        <div class="modal-content">
+    <!-- Modal: Ficha de Alumno con Pagos -->
+    <div class="modal" id="studentProfileModal">
+        <div class="modal-content modal-wide">
             <div class="modal-header">
-                <h3>Ingresar como Monitor</h3>
-                <button class="btn-close" onclick="closeMonitorLoginModal()">✕</button>
+                <div>
+                    <h3 id="profileStudentName"></h3>
+                    <div id="profileStudentMeta" class="profile-meta"></div>
+                </div>
+                <button class="btn-close" onclick="closeModal('studentProfileModal')">✕</button>
             </div>
-            <div style="padding: var(--spacing-lg);">
-                <div class="form-group">
-                    <label>Selecciona tu nombre o crea uno nuevo:</label>
-                    <select id="monitorSelect"
-                        style="width: 100%; padding: var(--spacing-sm); margin-bottom: var(--spacing-md); border: 2px solid var(--gray-200); border-radius: var(--radius-md);">
-                        <option value="">--- Nuevo Monitor ---</option>
-                    </select>
+            <div class="profile-body">
+                <div class="profile-summary-bar" id="profileSummaryBar"></div>
+                <div class="profile-add-section">
+                    <div class="profile-add-btns">
+                        <button class="btn btn-primary btn-sm" onclick="showAddPaymentForm('monthly')">+ Cuota mensual</button>
+                        <button class="btn btn-secondary btn-sm" onclick="showAddPaymentForm('class')">+ Clase suelta</button>
+                    </div>
+                    <div id="addPaymentFormContainer" class="add-payment-form-box" style="display:none">
+                        <div class="form-row">
+                            <div class="form-group" id="paymentPeriodGroup">
+                                <label>Mes</label>
+                                <input type="month" id="paymentPeriod">
+                            </div>
+                            <div class="form-group" id="paymentClassGroup" style="display:none">
+                                <label>Clase</label>
+                                <select id="paymentClassSelect" onchange="onClassSelectChange()"><option value="">Seleccionar clase...</option></select>
+                                <div id="paymentClassManualGroup" style="display:none; margin-top:0.4rem;">
+                                    <input type="text" id="paymentClassManual" placeholder="Ej: Lunes 2 junio · 10:00 (clase extra)">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Importe (€)</label>
+                                <input type="number" id="paymentAmount" min="0" step="0.5" placeholder="0.00">
+                            </div>
+                            <div class="form-group">
+                                <label>Método</label>
+                                <select id="paymentMethod">
+                                    <option value="">—</option>
+                                    <option value="efectivo">Efectivo</option>
+                                    <option value="bizum">Bizum</option>
+                                    <option value="transferencia">Transferencia</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Notas</label>
+                            <input type="text" id="paymentNotes" placeholder="Opcional">
+                        </div>
+                        <div class="add-payment-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="hideAddPaymentForm()">Cancelar</button>
+                            <button class="btn btn-primary btn-sm" onclick="submitAddPayment()">Guardar pago</button>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group" id="newMonitorNameGroup">
-                    <label for="newMonitorName">Nombre del nuevo monitor:</label>
-                    <input type="text" id="newMonitorName" placeholder="Tu nombre">
-                </div>
-                <div class="modal-actions">
-                    <button class="btn btn-secondary" onclick="closeMonitorLoginModal()">Cancelar</button>
-                    <button class="btn btn-primary" onclick="handleMonitorLogin()">Iniciar Sesión</button>
-                </div>
+                <div id="profilePaymentsList" class="profile-payments-list"></div>
             </div>
         </div>
     </div>
@@ -513,6 +641,42 @@
         </div>
     </div>
 
+    <!-- Modal: Confirmar eliminación de clase -->
+    <div class="modal" id="deleteClassModal">
+        <div class="modal-content modal-compact">
+            <div class="modal-header">
+                <h3>Eliminar clase</h3>
+                <button class="btn-close" onclick="closeModal('deleteClassModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="deleteClassModalDesc"></p>
+            </div>
+            <div class="modal-actions" id="deleteClassModalActions">
+                <button class="btn btn-secondary" onclick="closeModal('deleteClassModal')">Cancelar</button>
+                <button class="btn btn-danger" id="deleteSingleClassConfirmBtn">Solo esta clase</button>
+                <button class="btn btn-danger" id="deleteRecurringGroupConfirmBtn" style="display:none;">Todas las recurrentes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Confirmar baja de alumno -->
+    <div class="modal" id="deactivateStudentModal">
+        <div class="modal-content modal-compact">
+            <div class="modal-header">
+                <h3>Dar de baja</h3>
+                <button class="btn-close" onclick="closeModal('deactivateStudentModal')">✕</button>
+            </div>
+            <div class="modal-body" style="text-align:center; padding: var(--spacing-xl) var(--spacing-lg) var(--spacing-md);">
+                <p id="deactivateStudentModalDesc"></p>
+                <p style="font-size:var(--font-size-sm); color:var(--gray-500); margin-top:var(--spacing-sm);">El alumno quedará inactivo pero se conservarán todos sus datos y pagos.</p>
+            </div>
+            <div class="modal-actions" style="flex-direction:column; align-items:stretch; gap:var(--spacing-sm);">
+                <button class="btn btn-baja" id="deactivateStudentConfirmBtn">Confirmar baja</button>
+                <button class="btn btn-secondary" onclick="closeModal('deactivateStudentModal')">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Confirm Changes -->
     <div class="modal" id="confirmChangesModal">
         <div class="modal-content">
@@ -534,22 +698,194 @@
         </div>
     </div>
 
+    <!-- Modal: Editar pago -->
+    <div class="modal" id="editPaymentModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Editar pago</h3>
+                <button class="modal-close" onclick="closeModal('editPaymentModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Importe (€)</label>
+                        <input type="number" id="editPaymentAmount" min="0" step="0.5" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Método</label>
+                        <select id="editPaymentMethod">
+                            <option value="">—</option>
+                            <option value="efectivo">Efectivo</option>
+                            <option value="bizum">Bizum</option>
+                            <option value="transferencia">Transferencia</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Fecha de pago <span style="font-weight:400;color:#888">(vacío = pendiente)</span></label>
+                    <input type="date" id="editPaymentDate">
+                </div>
+                <div class="form-group">
+                    <label>Notas</label>
+                    <input type="text" id="editPaymentNotes" placeholder="Opcional">
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('editPaymentModal')">Cancelar</button>
+                <button class="btn btn-primary" onclick="saveEditPayment()">Guardar cambios</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Montar partido -->
+    <div class="modal" id="matchModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Montar partido</h3>
+                <button class="btn-close" onclick="closeModal('matchModal')">✕</button>
+            </div>
+            <form id="matchForm" onsubmit="event.preventDefault(); submitMatch();">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="matchDate">Fecha</label>
+                        <input type="date" id="matchDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="matchTime">Hora</label>
+                        <select id="matchTime" required>
+                            <!-- Opciones (cada 15 min) inyectadas por JS -->
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="matchCourt">Pista</label>
+                        <select id="matchCourt">
+                            <!-- Opciones (1..N) inyectadas por JS -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="matchType">Tipo de partido</label>
+                        <select id="matchType">
+                            <option value="competitive">Competitivo</option>
+                            <option value="friendly">Amistoso</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Rango de nivel</label>
+                    <div style="display:flex; gap:var(--spacing-sm); align-items:center; max-width:240px;">
+                        <input type="number" id="matchLevelMin" step="0.1" min="0" max="7" value="0.5" style="flex:1;" oninput="renderMatchPlayersSelector()">
+                        <span>–</span>
+                        <input type="number" id="matchLevelMax" step="0.1" min="0" max="7" value="5.0" style="flex:1;" oninput="renderMatchPlayersSelector()">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Jugadores (máx. 4 · los 2 primeros = Pareja A, los 2 siguientes = Pareja B)</label>
+                    <div class="players-selector" id="matchPlayersSelector">
+                        <!-- Inyectado por JS -->
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('matchModal')">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar partido</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Registrar resultado -->
+    <div class="modal" id="matchResultModal">
+        <div class="modal-content modal-compact">
+            <div class="modal-header">
+                <h3>Registrar resultado</h3>
+                <button class="btn-close" onclick="closeModal('matchResultModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>¿Qué pareja ganó el partido? Los dos jugadores ganadores subirán <strong>+0.1</strong> de nivel.</p>
+                <div id="matchResultTeams" class="match-result-teams"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Crear torneo -->
+    <div class="modal" id="tournamentModal">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h3>Nuevo torneo</h3>
+                <button class="btn-close" onclick="closeModal('tournamentModal')">✕</button>
+            </div>
+            <form id="tournamentForm" onsubmit="event.preventDefault(); submitTournament();">
+                <div class="form-group">
+                    <label for="tournamentName">Nombre del torneo</label>
+                    <input type="text" id="tournamentName" placeholder="Ej: Torneo de primavera" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="tournamentFormat">Formato</label>
+                        <select id="tournamentFormat">
+                            <option value="elimination">Eliminatoria directa</option>
+                            <option value="groups_elim">Fase de grupos + eliminatoria</option>
+                            <option value="round_robin">Liguilla (todos contra todos)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="tournamentSeeding">Emparejamiento inicial</label>
+                        <select id="tournamentSeeding">
+                            <option value="random">Aleatorio</option>
+                            <option value="manual">Manual (orden de inscripción)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="tournamentSeedByLevel">
+                        Sembrar por nivel de los alumnos registrados (cabezas de serie)
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>Parejas inscritas (2 alumnos por pareja)</label>
+                    <div class="players-selector" id="tournamentPairsSelector"><!-- JS --></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('tournamentModal')">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Crear y generar cuadro</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Resultado de partido de torneo -->
+    <div class="modal" id="tournamentResultModal">
+        <div class="modal-content modal-compact">
+            <div class="modal-header">
+                <h3>Registrar resultado</h3>
+                <button class="btn-close" onclick="closeModal('tournamentResultModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>¿Qué pareja ganó el partido?</p>
+                <div id="tournamentResultTeams" class="match-result-teams"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
     </div><!-- end app-view -->
 
     <!-- Scripts: Load order is CRITICAL -->
-    <!-- 0. ExcelJS for Excel export with colors -->
-    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+    <!-- ExcelJS NO se carga aquí: app.js (ensureExcelJS) lo carga bajo demanda al exportar -->
     <!-- 1. First load Supabase library from local node_modules -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
     <!-- 2. Then initialize Supabase client with detailed logging -->
-    <script src="supabase-init.js?v=7"></script>
+    <script src="supabase-init.js?v=24"></script>
     <!-- 3. Then load database layer -->
-    <script src="db.js?v=7"></script>
+    <script src="db.js?v=24"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=7"></script>
+    <script src="app.js?v=24"></script>
+    <!-- 5. Torneos (depende de app.js y db.js) -->
+    <script src="tournaments.js?v=24"></script>
 </body>
 
 </html>

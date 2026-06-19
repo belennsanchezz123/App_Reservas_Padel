@@ -261,6 +261,8 @@ const db = {
                     id: classData.id,
                     day: classData.day,
                     date: classData.date,
+                    start_time: classData.startTime,
+                    end_time: classData.endTime,
                     start_at: `${_dateStr}T${classData.startTime}:00`,
                     end_at: `${_dateStr}T${classData.endTime}:00`,
                     students: classData.students,
@@ -269,7 +271,8 @@ const db = {
                     is_completed: classData.isCompleted || false,
                     monitor_id: classData.monitorId,
                     monitor_name: classData.monitorName,
-                    comments: classData.comments || null
+                    comments: classData.comments || null,
+                    recurring_group_id: classData.recurringGroupId || null
                 }], { onConflict: 'monitor_id,start_at' })
                 .select()
                 .single();
@@ -289,6 +292,8 @@ const db = {
             const dbUpdates = {};
             if (updates.day !== undefined) dbUpdates.day = updates.day;
             if (updates.date !== undefined) dbUpdates.date = updates.date;
+            if (updates.startTime !== undefined) dbUpdates.start_time = updates.startTime;
+            if (updates.endTime !== undefined) dbUpdates.end_time = updates.endTime;
             if (updates.date !== undefined && updates.startTime !== undefined)
                 dbUpdates.start_at = `${new Date(updates.date).toLocaleDateString('sv')}T${updates.startTime}:00`;
             if (updates.date !== undefined && updates.endTime !== undefined)
@@ -332,6 +337,51 @@ const db = {
         }
     },
 
+    async deleteClassesByGroup(groupId) {
+        try {
+            const { error } = await supabase
+                .from('classes')
+                .delete()
+                .eq('recurring_group_id', groupId);
+
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error deleting recurring group:', error);
+            throw error;
+        }
+    },
+
+    async createClasses(classesArray) {
+        try {
+            const rows = classesArray.map(c => {
+                const dateStr = new Date(c.date).toLocaleDateString('sv');
+                return {
+                    id: c.id,
+                    day: c.day,
+                    date: c.date,
+                    start_at: `${dateStr}T${c.startTime}:00`,
+                    end_at: `${dateStr}T${c.endTime}:00`,
+                    students: c.students,
+                    max_capacity: c.maxCapacity || 4,
+                    status: c.status || 'active',
+                    is_completed: c.isCompleted || false,
+                    monitor_id: c.monitorId,
+                    monitor_name: c.monitorName,
+                    comments: c.comments || null,
+                    recurring_group_id: c.recurringGroupId || null,
+                };
+            });
+            const { data, error } = await supabase.from('classes').insert(rows).select();
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error creating classes batch:', error);
+            try { console.error('Error details:', JSON.stringify(error, null, 2)); } catch (e) {}
+            throw error;
+        }
+    },
+
     // ==========================================
     // UTILITY FUNCTIONS
     // ==========================================
@@ -339,20 +389,31 @@ const db = {
     // Convertir datos de Supabase (snake_case) a formato app (camelCase)
     convertClassFromDB(dbClass) {
         if (!dbClass) return null;
-        const _startAt = new Date(dbClass.start_at);
         const _DAYS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+
+        // Usar start_time/end_time (tipo TIME, sin zona horaria) cuando existen.
+        // start_at es timestamptz y el navegador lo convierte a local causando desfase +2h en CEST.
+        const startTime = dbClass.start_time
+            ? String(dbClass.start_time).substring(0, 5)
+            : String(dbClass.start_at || '').substring(11, 16);
+        const endTime = dbClass.end_time
+            ? String(dbClass.end_time).substring(0, 5)
+            : String(dbClass.end_at || '').substring(11, 16);
+
+        // date y day: usar columnas directas cuando existen para evitar conversión de zona horaria
+        const dateStr = dbClass.date
+            ? String(dbClass.date).substring(0, 10)
+            : String(dbClass.start_at || '').substring(0, 10);
+        const startHour = parseInt(startTime.split(':')[0], 10);
+        const dateObj = new Date(`${dateStr}T${startTime}:00`);
+        const day = dbClass.day || _DAYS_ES[(dateObj.getDay() + 6) % 7];
+
         return {
             id: dbClass.id,
-            day: _DAYS_ES[(_startAt.getDay() + 6) % 7],
-            date: _startAt.toLocaleDateString('sv'),
-            startTime: new Date(dbClass.start_at).toLocaleTimeString('es-ES', {
-                hour: '2-digit',
-                minute: '2-digit'
-            }),
-            endTime: new Date(dbClass.end_at).toLocaleTimeString('es-ES', {
-                hour: '2-digit',
-                minute: '2-digit'
-            }),
+            day,
+            date: dateStr,
+            startTime,
+            endTime,
             students: dbClass.students || [],
             maxCapacity: dbClass.max_capacity,
             status: dbClass.status,
@@ -360,7 +421,8 @@ const db = {
             monitorId: dbClass.monitor_id,
             monitorName: dbClass.monitor_name,
             comments: dbClass.comments || '',
-            paid: dbClass.paid || false
+            paid: dbClass.paid || false,
+            recurringGroupId: dbClass.recurring_group_id || null
         };
     },
 
@@ -372,8 +434,23 @@ const db = {
             email: dbStudent.email,
             phone: dbStudent.phone,
             level: dbStudent.level,
-            registeredDate: dbStudent.registered_date
+            registeredDate: dbStudent.registered_date,
+            active: dbStudent.active !== false,
         };
+    },
+
+    async setStudentActive(id, active) {
+        try {
+            const { error } = await supabase
+                .from('students')
+                .update({ active })
+                .eq('id', id);
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error updating student active status:', error);
+            throw error;
+        }
     },
 
     convertMonitorFromDB(dbMonitor) {
@@ -384,62 +461,455 @@ const db = {
             email: dbMonitor.email,
             phone: dbMonitor.phone,
             role: dbMonitor.role,
+            permissions: dbMonitor.permissions || [],
             createdDate: dbMonitor.created_date
         };
-    }
+    },
+
+    // ==========================================
+    // STUDENT PAYMENTS
+    // ==========================================
+
+    async getPaymentsByStudent(studentId) {
+        try {
+            const { data, error } = await supabase
+                .from('student_payments')
+                .select('*')
+                .eq('student_id', studentId)
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting student payments:', error);
+            throw error;
+        }
+    },
+
+    // Pagos cobrados en un rango de fechas (por paid_date). from/to en formato
+    // 'YYYY-MM-DD' (ambos inclusive). Devuelve solo pagos con fecha de pago.
+    async getPaymentsByDateRange(from, to) {
+        try {
+            const { data, error } = await supabase
+                .from('student_payments')
+                .select('*')
+                .not('paid_date', 'is', null)
+                .gte('paid_date', from)
+                .lte('paid_date', to)
+                .order('created_at', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting payments by date range:', error);
+            throw error;
+        }
+    },
+
+    async createPayment(payment) {
+        try {
+            const { data, error } = await supabase
+                .from('student_payments')
+                .insert([{
+                    student_id: payment.studentId,
+                    class_id: payment.classId || null,
+                    period: payment.period || null,
+                    amount: payment.amount !== null ? payment.amount : null,
+                    paid_date: payment.paidDate || null,
+                    method: payment.method || null,
+                    notes: payment.notes || null,
+                }])
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error creating payment:', error);
+            throw error;
+        }
+    },
+
+    async updatePayment(id, updates) {
+        try {
+            const dbUpdates = {};
+            if (updates.paidDate !== undefined) dbUpdates.paid_date = updates.paidDate;
+            if (updates.amount !== undefined) dbUpdates.amount = updates.amount;
+            if (updates.method !== undefined) dbUpdates.method = updates.method;
+            if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
+            const { data, error } = await supabase
+                .from('student_payments')
+                .update(dbUpdates)
+                .eq('id', id)
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error updating payment:', error);
+            throw error;
+        }
+    },
+
+    async deletePayment(id) {
+        try {
+            const { error } = await supabase
+                .from('student_payments')
+                .delete()
+                .eq('id', id);
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error deleting payment:', error);
+            throw error;
+        }
+    },
+
+    convertPaymentFromDB(p) {
+        if (!p) return null;
+        return {
+            id: p.id,
+            studentId: p.student_id,
+            classId: p.class_id || null,
+            period: p.period || null,
+            amount: p.amount !== null && p.amount !== undefined ? parseFloat(p.amount) : null,
+            paidDate: p.paid_date || null,
+            method: p.method || null,
+            notes: p.notes || null,
+            createdAt: p.created_at,
+        };
+    },
+
+    // ==========================================
+    // MATCHES (partidos por nivel — estilo Playtomic)
+    // ==========================================
+
+    async getMatches() {
+        try {
+            const { data, error } = await supabase
+                .from('matches')
+                .select('*')
+                .order('match_date', { ascending: true })
+                .order('start_time', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting matches:', error);
+            throw error;
+        }
+    },
+
+    async createMatch(match) {
+        try {
+            const { data, error } = await supabase
+                .from('matches')
+                .insert([{
+                    match_date: match.matchDate,
+                    start_time: match.startTime,
+                    match_type: match.matchType || 'competitive',
+                    level_min: match.levelMin,
+                    level_max: match.levelMax,
+                    players: match.players || [],
+                    court: match.court || null,
+                    comments: match.comments || null,
+                }])
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error creating match:', error);
+            throw error;
+        }
+    },
+
+    async updateMatch(id, updates) {
+        try {
+            // Conversión camelCase (app) -> snake_case (Supabase)
+            const dbUpdates = {};
+            if (updates.matchDate !== undefined) dbUpdates.match_date = updates.matchDate;
+            if (updates.startTime !== undefined) dbUpdates.start_time = updates.startTime;
+            if (updates.matchType !== undefined) dbUpdates.match_type = updates.matchType;
+            if (updates.levelMin !== undefined) dbUpdates.level_min = updates.levelMin;
+            if (updates.levelMax !== undefined) dbUpdates.level_max = updates.levelMax;
+            if (updates.players !== undefined) dbUpdates.players = updates.players;
+            if (updates.court !== undefined) dbUpdates.court = updates.court;
+            if (updates.winner !== undefined) dbUpdates.winner = updates.winner;
+            if (updates.isCompleted !== undefined) dbUpdates.is_completed = updates.isCompleted;
+            if (updates.comments !== undefined) dbUpdates.comments = updates.comments;
+
+            const { data, error } = await supabase
+                .from('matches')
+                .update(dbUpdates)
+                .eq('id', id)
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error updating match:', error);
+            throw error;
+        }
+    },
+
+    async deleteMatch(id) {
+        try {
+            const { error } = await supabase
+                .from('matches')
+                .delete()
+                .eq('id', id);
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error deleting match:', error);
+            throw error;
+        }
+    },
+
+    convertMatchFromDB(m) {
+        if (!m) return null;
+        return {
+            id: m.id,
+            matchDate: m.match_date ? String(m.match_date).substring(0, 10) : null,
+            startTime: m.start_time ? String(m.start_time).substring(0, 5) : '',
+            matchType: m.match_type || 'competitive',
+            levelMin: m.level_min !== null && m.level_min !== undefined ? parseFloat(m.level_min) : null,
+            levelMax: m.level_max !== null && m.level_max !== undefined ? parseFloat(m.level_max) : null,
+            players: m.players || [],
+            court: m.court !== null && m.court !== undefined ? parseInt(m.court, 10) : null,
+            winner: m.winner || null,
+            isCompleted: m.is_completed || false,
+            comments: m.comments || '',
+            createdAt: m.created_at,
+        };
+    },
+
+    // ==========================================
+    // TORNEOS
+    // ==========================================
+
+    async getTournaments() {
+        try {
+            const { data, error } = await supabase
+                .from('tournaments')
+                .select('*')
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting tournaments:', error);
+            throw error;
+        }
+    },
+
+    async createTournament(t) {
+        try {
+            const { data, error } = await supabase
+                .from('tournaments')
+                .insert([{
+                    name: t.name,
+                    format: t.format,
+                    seeding: t.seeding,
+                    status: t.status || 'setup',
+                    num_pairs: t.numPairs || 0,
+                    num_groups: t.numGroups || 0,
+                    qualifiers_per_group: t.qualifiersPerGroup || 0,
+                    bracket_size: t.bracketSize || 0,
+                }])
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error creating tournament:', error);
+            throw error;
+        }
+    },
+
+    async updateTournament(id, updates) {
+        try {
+            const dbUpdates = {};
+            if (updates.name !== undefined) dbUpdates.name = updates.name;
+            if (updates.status !== undefined) dbUpdates.status = updates.status;
+            if (updates.numPairs !== undefined) dbUpdates.num_pairs = updates.numPairs;
+            if (updates.numGroups !== undefined) dbUpdates.num_groups = updates.numGroups;
+            if (updates.qualifiersPerGroup !== undefined) dbUpdates.qualifiers_per_group = updates.qualifiersPerGroup;
+            if (updates.bracketSize !== undefined) dbUpdates.bracket_size = updates.bracketSize;
+            if (updates.winnerPairId !== undefined) dbUpdates.winner_pair_id = updates.winnerPairId;
+            const { data, error } = await supabase
+                .from('tournaments').update(dbUpdates).eq('id', id).select().single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error updating tournament:', error);
+            throw error;
+        }
+    },
+
+    async deleteTournament(id) {
+        try {
+            // tournament_pairs y tournament_matches se borran en cascada (ON DELETE CASCADE).
+            const { error } = await supabase.from('tournaments').delete().eq('id', id);
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error deleting tournament:', error);
+            throw error;
+        }
+    },
+
+    async getTournamentPairs(tournamentId) {
+        try {
+            const { data, error } = await supabase
+                .from('tournament_pairs').select('*')
+                .eq('tournament_id', tournamentId)
+                .order('seed', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting tournament pairs:', error);
+            throw error;
+        }
+    },
+
+    // Inserta varias parejas de una vez (devuelve las filas con id).
+    async createTournamentPairs(pairs) {
+        try {
+            const rows = pairs.map(p => ({
+                tournament_id: p.tournamentId,
+                player1_id: p.player1Id,
+                player2_id: p.player2Id,
+                name: p.name || null,
+                seed: p.seed ?? null,
+                group_index: p.groupIndex ?? null,
+            }));
+            const { data, error } = await supabase.from('tournament_pairs').insert(rows).select();
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error creating tournament pairs:', error);
+            throw error;
+        }
+    },
+
+    async updateTournamentPair(id, updates) {
+        try {
+            const dbUpdates = {};
+            if (updates.seed !== undefined) dbUpdates.seed = updates.seed;
+            if (updates.groupIndex !== undefined) dbUpdates.group_index = updates.groupIndex;
+            const { data, error } = await supabase
+                .from('tournament_pairs').update(dbUpdates).eq('id', id).select().single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error updating tournament pair:', error);
+            throw error;
+        }
+    },
+
+    async getTournamentMatches(tournamentId) {
+        try {
+            const { data, error } = await supabase
+                .from('tournament_matches').select('*')
+                .eq('tournament_id', tournamentId)
+                .order('phase', { ascending: true })
+                .order('round', { ascending: true })
+                .order('slot', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting tournament matches:', error);
+            throw error;
+        }
+    },
+
+    async createTournamentMatches(matches) {
+        try {
+            const rows = matches.map(m => ({
+                tournament_id: m.tournamentId,
+                phase: m.phase,
+                group_index: m.groupIndex ?? null,
+                round: m.round || 0,
+                slot: m.slot || 0,
+                pair_a_id: m.pairAId || null,
+                pair_b_id: m.pairBId || null,
+                label_a: m.labelA || null,
+                label_b: m.labelB || null,
+            }));
+            const { data, error } = await supabase.from('tournament_matches').insert(rows).select();
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error creating tournament matches:', error);
+            throw error;
+        }
+    },
+
+    async updateTournamentMatch(id, updates) {
+        try {
+            const dbUpdates = {};
+            if (updates.pairAId !== undefined) dbUpdates.pair_a_id = updates.pairAId;
+            if (updates.pairBId !== undefined) dbUpdates.pair_b_id = updates.pairBId;
+            if (updates.winnerPairId !== undefined) dbUpdates.winner_pair_id = updates.winnerPairId;
+            if (updates.score !== undefined) dbUpdates.score = updates.score;
+            if (updates.labelA !== undefined) dbUpdates.label_a = updates.labelA;
+            if (updates.labelB !== undefined) dbUpdates.label_b = updates.labelB;
+            const { data, error } = await supabase
+                .from('tournament_matches').update(dbUpdates).eq('id', id).select().single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error updating tournament match:', error);
+            throw error;
+        }
+    },
+
+    convertTournamentFromDB(t) {
+        if (!t) return null;
+        return {
+            id: t.id,
+            name: t.name,
+            format: t.format,
+            seeding: t.seeding,
+            status: t.status,
+            numPairs: t.num_pairs,
+            numGroups: t.num_groups,
+            qualifiersPerGroup: t.qualifiers_per_group,
+            bracketSize: t.bracket_size,
+            winnerPairId: t.winner_pair_id || null,
+            createdAt: t.created_at,
+        };
+    },
+
+    convertTournamentPairFromDB(p) {
+        if (!p) return null;
+        return {
+            id: p.id,
+            tournamentId: p.tournament_id,
+            player1Id: p.player1_id,
+            player2Id: p.player2_id,
+            name: p.name || '',
+            seed: p.seed,
+            groupIndex: p.group_index,
+        };
+    },
+
+    convertTournamentMatchFromDB(m) {
+        if (!m) return null;
+        return {
+            id: m.id,
+            tournamentId: m.tournament_id,
+            phase: m.phase,
+            groupIndex: m.group_index,
+            round: m.round,
+            slot: m.slot,
+            pairAId: m.pair_a_id || null,
+            pairBId: m.pair_b_id || null,
+            labelA: m.label_a || null,
+            labelB: m.label_b || null,
+            winnerPairId: m.winner_pair_id || null,
+            score: m.score || null,
+        };
+    },
 };
-// Variable para guardar el usuario actual
-let currentUser = null;
 
-// Función para manejar el inicio de sesión
-async function handleLogin() {
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-    const errorMsg = document.getElementById('error-msg');
-
-    try {
-        errorMsg.style.display = 'none';
-        
-        // 1. Intentamos iniciar sesión con Supabase
-        const { data, error } = await supabase.auth.signInWithPassword({
-            email: email,
-            password: password,
-        });
-
-        if (error) throw error;
-
-        // 2. Si no hay error, guardamos el usuario y mostramos la app
-        currentUser = data.user;
-        mostrarApp();
-        alert('¡Bienvenida/o! Sesión iniciada correctamente.');
-
-    } catch (error) {
-        console.error('Error de login:', error);
-        errorMsg.textContent = 'Usuario o contraseña incorrectos';
-        errorMsg.style.display = 'block';
-    }
-}
-
-function mostrarApp() {
-    // Ocultamos el login
-    document.getElementById('login-view').style.display = 'none';
-    // Mostramos la app
-    document.getElementById('app-view').style.display = 'block';
-    
-    // AQUÍ ES IMPORTANTE: Recargar los datos ahora que tenemos permiso
-    // Si tienes funciones como cargarClases() o inicializarApp(), llámalas aquí:
-    if (typeof cargarMonitores === 'function') cargarMonitores();
-    if (typeof cargarClases === 'function') cargarClases(); 
-}
-
-// Opcional: Comprobar si ya había sesión iniciada al recargar la página
-async function checkSession() {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-        currentUser = session.user;
-        mostrarApp();
-    }
-}
-
-// Ejecutar comprobación al iniciar
-checkSession();
+// NOTA: la lógica de sesión (login, logout, comprobación de sesión) vive
+// exclusivamente en app.js (handleLogin / initializeApp). No añadir aquí
+// funciones de autenticación duplicadas.
