@@ -3429,13 +3429,17 @@ function renderCajaView() {
         </div>`;
 
     // --- Cuadre de caja (solo efectivo) ---
+    appState._cajaEfectivo = efectivo;
     const counted = parseFloat(appState.cajaCounted);
-    let diffHtml = '';
+    let badgeClass = 'caja-diff';
+    let badgeLabel = '';
+    let badgeVisible = false;
     if (!isNaN(counted) && appState.cajaCounted !== '') {
         const diff = counted - efectivo;
         const cls = Math.abs(diff) < 0.005 ? 'ok' : (diff > 0 ? 'over' : 'under');
-        const label = cls === 'ok' ? '✅ Cuadra' : (diff > 0 ? `🔼 Sobra ${eur(Math.abs(diff))}` : `🔽 Falta ${eur(Math.abs(diff))}`);
-        diffHtml = `<span class="caja-diff caja-diff-${cls}">${label}</span>`;
+        badgeClass = `caja-diff caja-diff-${cls}`;
+        badgeLabel = cls === 'ok' ? '✅ Cuadra' : (diff > 0 ? `🔼 Sobra ${eur(Math.abs(diff))}` : `🔽 Falta ${eur(Math.abs(diff))}`);
+        badgeVisible = true;
     }
     document.getElementById('cajaReconcile').innerHTML = `
         <div class="caja-reconcile-box">
@@ -3443,13 +3447,14 @@ function renderCajaView() {
             <div class="caja-reconcile-row">
                 <span>Efectivo esperado: <strong>${eur(efectivo)}</strong></span>
                 <label class="caja-reconcile-input">Efectivo contado:
-                    <input type="number" min="0" step="0.5" placeholder="0.00"
+                    <input type="text" inputmode="decimal" placeholder="0.00" id="cajaCountedInput"
                         value="${escapeHtml(appState.cajaCounted)}"
                         oninput="updateCajaCounted(this.value)">
                 </label>
-                ${diffHtml}
+                <span id="cajaDiffBadge" class="${badgeClass}" style="visibility:${badgeVisible ? 'visible' : 'hidden'}">${escapeHtml(badgeLabel)}</span>
             </div>
         </div>`;
+
 
     // --- Tabla de movimientos ---
     const listEl = document.getElementById('cajaList');
@@ -3477,7 +3482,22 @@ function renderCajaView() {
 
 function updateCajaCounted(value) {
     appState.cajaCounted = value;
-    renderCajaView();
+    const badge = document.getElementById('cajaDiffBadge');
+    if (!badge) return;
+    const efectivo = appState._cajaEfectivo ?? 0;
+    const eur = n => `€${n.toFixed(2)}`;
+    const counted = parseFloat(value);
+    if (!isNaN(counted) && value !== '') {
+        const diff = counted - efectivo;
+        const cls = Math.abs(diff) < 0.005 ? 'ok' : (diff > 0 ? 'over' : 'under');
+        const label = cls === 'ok' ? '✅ Cuadra' : (diff > 0 ? `🔼 Sobra ${eur(Math.abs(diff))}` : `🔽 Falta ${eur(Math.abs(diff))}`);
+        badge.className = `caja-diff caja-diff-${cls}`;
+        badge.textContent = label;
+        badge.style.visibility = 'visible';
+    } else {
+        badge.style.visibility = 'hidden';
+        badge.textContent = '';
+    }
 }
 
 async function exportCajaToExcel() {
