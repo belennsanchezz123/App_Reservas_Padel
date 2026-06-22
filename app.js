@@ -3100,6 +3100,7 @@ function showMainApp() {
     if (header) header.style.display = 'block';
 
     updateHeaderForUser();
+    fetchWeather();
 
     if (isCoordinator()) {
         showCoordinatorDashboard();
@@ -4646,6 +4647,74 @@ function initializeEventListeners() {
             }
         });
     });
+}
+
+// ==========================================
+// WEATHER WIDGET
+// ==========================================
+
+const WEATHER_CODES = {
+    0: '☀️', 1: '🌤️', 2: '⛅', 3: '🌥️',
+    45: '🌫️', 48: '🌫️',
+    51: '🌦️', 53: '🌦️', 55: '🌧️',
+    61: '🌧️', 63: '🌧️', 65: '🌧️',
+    71: '🌨️', 73: '🌨️', 75: '❄️',
+    80: '🌦️', 81: '🌧️', 82: '⛈️',
+    95: '⛈️', 96: '⛈️', 99: '⛈️',
+};
+
+async function fetchWeather() {
+    const widget = document.getElementById('weatherWidget');
+    if (!widget) return;
+
+    // Coordenadas: C. Federico García Lorca, 21, Guadalupe, Murcia
+    const lat = 38.0177003;
+    const lon = -1.1754612;
+
+    try {
+        const res = await fetch(
+            `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+            `&current=temperature_2m,wind_speed_10m,wind_gusts_10m,weather_code` +
+            `&timezone=auto&forecast_days=1`
+        );
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+
+        const temp = Math.round(data.current.temperature_2m);
+        const wind = Math.round(data.current.wind_speed_10m);
+        const gusts = Math.round(data.current.wind_gusts_10m);
+        const code = data.current.weather_code;
+        const emoji = WEATHER_CODES[code] || '🌡️';
+
+        widget.replaceChildren();
+
+        const spanEmoji = document.createElement('span');
+        spanEmoji.className = 'weather-emoji';
+        spanEmoji.textContent = emoji;
+
+        const spanTemp = document.createElement('span');
+        spanTemp.className = 'weather-temp';
+        spanTemp.textContent = `${temp}°C`;
+
+        const spanWind = document.createElement('span');
+        spanWind.className = 'weather-wind';
+        const spanGusts = document.createElement('span');
+        spanGusts.style.cssText = 'opacity:0.7;font-size:0.8em';
+        spanGusts.textContent = `(${gusts})`;
+        spanWind.append(`💨 ${wind} `, spanGusts, ' km/h');
+
+        widget.append(spanEmoji, spanTemp, spanWind);
+
+        if (gusts > 30) {
+            const spanAlert = document.createElement('span');
+            spanAlert.className = 'weather-alert';
+            spanAlert.title = 'Rachas fuertes, puede afectar al juego';
+            spanAlert.textContent = '⚠️';
+            widget.append(spanAlert);
+        }
+    } catch (e) {
+        widget.innerHTML = '';
+    }
 }
 
 // ==========================================

@@ -1799,6 +1799,38 @@ form {
     border-radius: var(--radius-md);
 }
 
+.weather-widget {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--font-size-sm);
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-md);
+    padding: 4px 10px;
+    white-space: nowrap;
+    cursor: default;
+}
+
+.weather-widget .weather-emoji {
+    font-size: 1.2rem;
+    line-height: 1;
+}
+
+.weather-widget .weather-temp {
+    font-weight: 700;
+    font-size: var(--font-size-md);
+}
+
+.weather-widget .weather-wind {
+    opacity: 0.85;
+}
+
+.weather-widget .weather-alert {
+    color: #ffd666;
+    font-size: 1rem;
+}
+
 /* ==========================================
    COORDINATOR DASHBOARD
    ========================================== */
