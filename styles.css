@@ -154,8 +154,8 @@ body {
    HEADER
    ========================================== */
 .header {
-    background: var(--ink-900);
-    color: white;
+    background: rgba(255, 255, 255, 0.88);
+    color: #1a2332;
     padding: var(--spacing-md) var(--spacing-xl);
     border-bottom: 3px solid var(--primary-green);
     box-shadow: var(--shadow-md);
@@ -208,7 +208,7 @@ body {
 }
 
 .btn-home:hover {
-    background: rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.1);
     transform: scale(1.15);
 }
 
@@ -1793,9 +1793,9 @@ form {
 .user-display {
     font-size: var(--font-size-lg);
     font-weight: 600;
-    color: white;
+    color: #1a2332;
     padding: var(--spacing-sm) var(--spacing-md);
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.08);
     border-radius: var(--radius-md);
 }
 
@@ -1804,8 +1804,8 @@ form {
     align-items: center;
     gap: 6px;
     font-size: var(--font-size-sm);
-    color: white;
-    background: rgba(255, 255, 255, 0.1);
+    color: #1a2332;
+    background: rgba(0, 0, 0, 0.06);
     border-radius: var(--radius-md);
     padding: 4px 10px;
     white-space: nowrap;
@@ -1827,7 +1827,7 @@ form {
 }
 
 .weather-widget .weather-alert {
-    color: #ffd666;
+    color: #d97706;
     font-size: 1rem;
 }
 
