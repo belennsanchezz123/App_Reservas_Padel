@@ -54,11 +54,11 @@ CREATE INDEX IF NOT EXISTS idx_classes_monitor ON classes(monitor_id);
 CREATE INDEX IF NOT EXISTS idx_students_name ON students(name);
 CREATE INDEX IF NOT EXISTS idx_monitors_name ON monitors(name);
 
--- Deshabilitar Row Level Security (RLS) para modo simple
--- IMPORTANTE: Solo para desarrollo/pruebas
-ALTER TABLE monitors DISABLE ROW LEVEL SECURITY;
-ALTER TABLE students DISABLE ROW LEVEL SECURITY;
-ALTER TABLE classes DISABLE ROW LEVEL SECURITY;
+-- Row Level Security (RLS)
+-- La seguridad se configura en rls_security.sql (activa RLS + políticas
+-- para usuarios autenticados). NO desactivar RLS aquí: dejarlo deshabilitado
+-- expone toda la base de datos a cualquiera con la anonKey.
+-- Ver rls_security.sql y rls_security_por_rol.sql.
 
 -- Comentarios en las tablas
 COMMENT ON TABLE monitors IS 'Monitores de clases de pádel';
