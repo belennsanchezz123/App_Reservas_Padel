@@ -930,9 +930,29 @@ function renderDayClassesPanel(date) {
     const weekdayIndex = (d.getDay() + 6) % 7; // 0=Lunes
     const weekdayName = CONFIG.days[weekdayIndex];
 
+    // Alinear la semana activa con el día mostrado: tanto el guardado del
+    // formulario de clase como el drag táctil calculan la fecha final a
+    // partir de appState.currentWeekStart, no del día seleccionado.
+    appState.currentWeekStart = getMonday(d);
+
     titleEl.textContent = `${weekdayName} ${formatDate(d)}`;
 
     const classesForDay = getClassesForDate(d);
+
+    // Estado vacío explícito con la acción disponible
+    let emptyMsg = document.getElementById('dayViewEmptyMsg');
+    if (classesForDay.length === 0) {
+        if (!emptyMsg) {
+            emptyMsg = document.createElement('p');
+            emptyMsg.id = 'dayViewEmptyMsg';
+            emptyMsg.className = 'day-classes-empty';
+            panel.insertBefore(emptyMsg, gridEl);
+        }
+        emptyMsg.textContent = 'No hay clases este día. Toca una hora libre o "+ Nueva clase" para crear una.';
+    } else if (emptyMsg) {
+        emptyMsg.remove();
+    }
+
     gridEl.innerHTML = '';
     const timeColumn = document.createElement('div');
     timeColumn.className = 'time-column day-view-time-column';
@@ -956,6 +976,11 @@ function renderDayClassesPanel(date) {
                 cell.appendChild(classCard);
             });
             cell.classList.add('has-class');
+        } else {
+            // Igual que en escritorio: tocar una hora libre crea una clase ahí
+            cell.addEventListener('click', () => {
+                openAddClassModal(weekdayName, hour);
+            });
         }
 
         dayColumn.appendChild(cell);
@@ -963,6 +988,13 @@ function renderDayClassesPanel(date) {
 
     gridEl.appendChild(timeColumn);
     gridEl.appendChild(dayColumn);
+
+    // Llevar el scroll interno hasta la primera clase del día
+    if (classesForDay.length > 0) {
+        const slotHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--slot-height'), 10) || 60;
+        const firstStartMin = timeStringToMinutes(classesForDay[0].startTime);
+        gridEl.scrollTop = Math.max(0, ((firstStartMin - CONFIG.hoursStart * 60) / 60) * slotHeight - 20);
+    }
 
     // Guardar el día actualmente mostrado para el botón de añadir desde vista diaria
     appState.selectedDayDate = d.toISOString();
@@ -1952,6 +1984,11 @@ function renderStudentsSelector() {
     // render selected pills
     function renderSelectedPills() {
         selectedWrap.innerHTML = '';
+        const counter = document.createElement('div');
+        counter.className = 'students-selector-counter';
+        counter.textContent = `${selected.length}/${CONFIG.maxStudentsPerClass} alumnos`;
+        if (selected.length >= CONFIG.maxStudentsPerClass) counter.classList.add('full');
+        selectedWrap.appendChild(counter);
         if (selected.length === 0) {
             const hint = document.createElement('div');
             hint.style.color = 'var(--gray-500)';
@@ -2027,13 +2064,21 @@ function renderStudentsSelector() {
 
             const action = document.createElement('button');
             action.className = 'btn btn-secondary';
-            action.textContent = selected.includes(s.id) ? 'Quitar' : 'Añadir';
+            action.type = 'button';
+            const isSelected = selected.includes(s.id);
+            const isFull = selected.length >= CONFIG.maxStudentsPerClass;
+            action.textContent = isSelected ? 'Quitar' : (isFull ? 'Completo' : 'Añadir');
+            if (!isSelected && isFull) action.disabled = true;
             action.addEventListener('click', (e) => {
                 e.stopPropagation();
                 if (selected.includes(s.id)) {
                     const idx = selected.indexOf(s.id);
                     if (idx !== -1) selected.splice(idx, 1);
                 } else {
+                    if (selected.length >= CONFIG.maxStudentsPerClass) {
+                        showToast(`Máximo ${CONFIG.maxStudentsPerClass} alumnos por clase`, 'error');
+                        return;
+                    }
                     selected.push(s.id);
                 }
                 renderSelectedPills();
@@ -3735,6 +3780,21 @@ window.addEventListener('resize', () => {
     }
 });
 
+// Cambiar entre calendario semanal (escritorio) y mensual (móvil) al
+// redimensionar o rotar el dispositivo, sin necesidad de recargar.
+let _lastLayoutIsMobile = window.innerWidth <= 768;
+let _layoutResizeTimer = null;
+window.addEventListener('resize', () => {
+    clearTimeout(_layoutResizeTimer);
+    _layoutResizeTimer = setTimeout(() => {
+        const nowMobile = window.innerWidth <= 768;
+        if (nowMobile !== _lastLayoutIsMobile) {
+            _lastLayoutIsMobile = nowMobile;
+            renderCalendar();
+        }
+    }, 150);
+});
+
 function switchMatchesView(view) {
     appState.matchesView = view;
     renderMatchesArea();
@@ -4614,6 +4674,9 @@ function initializeEventListeners() {
 
             const weekdayIndex = (baseDate.getDay() + 6) % 7; // 0=Lunes
             const weekdayName = CONFIG.days[weekdayIndex];
+
+            // La fecha final se calcula desde currentWeekStart: alinearla con el día mostrado
+            appState.currentWeekStart = getMonday(baseDate);
 
             // Abrimos el modal de nueva clase con el día y la hora sugeridos
             openAddClassModal(weekdayName, clampedHour);

@@ -647,7 +647,10 @@ body {
     z-index: 1;
     -webkit-user-select: none;
     user-select: none;
-    touch-action: none;
+    /* pan-y: el navegador puede hacer scroll vertical si el dedo empieza sobre
+       la tarjeta; el drag por pulsación larga sigue funcionando porque el
+       touchmove (passive:false) hace preventDefault al activarse el arrastre */
+    touch-action: pan-y;
 }
 /*
     Disable transitions while dragging to prevent trompicones */
@@ -687,6 +690,15 @@ body {
 
 .class-card:hover .resize-handle {
     opacity: 1;
+}
+
+/* En táctil el handle solo responde a ratón (mousedown): se oculta para no
+   dejar una franja muerta en la base de la tarjeta. En móvil la duración se
+   ajusta editando la hora de fin en el modal. */
+@media (hover: none) {
+    .class-card .resize-handle {
+        display: none;
+    }
 }
 
 /* Floating small panel shown after dragging with Save/Cancel actions */
@@ -1054,8 +1066,10 @@ body {
     background: var(--gray-200);
     border: 1px solid var(--gray-200);
     border-radius: var(--radius-md);
-    /* Permitimos scroll interno en la vista de horas del día */
+    /* Permitimos scroll interno en la vista de horas del día.
+       dvh tiene en cuenta la barra de URL móvil (fallback vh) */
     max-height: calc(100vh - 220px);
+    max-height: calc(100dvh - 220px);
     overflow-y: auto;
     overflow-x: hidden;
 }
@@ -1397,6 +1411,18 @@ form {
     box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
 }
 
+/* Contador de alumnos seleccionados en el modal de clase (máx. 4) */
+.students-selector-counter {
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    color: var(--gray-500);
+    margin-bottom: var(--spacing-xs);
+}
+
+.students-selector-counter.full {
+    color: var(--status-danger, #dc2626);
+}
+
 .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1674,6 +1700,99 @@ form {
 
     .toast {
         min-width: auto;
+    }
+
+    /* Los botones "← Semana Anterior / Semana Siguiente →" de acciones rápidas
+       no tienen sentido en la vista mensual del móvil */
+    .quick-actions button[onclick^="navigateWeek"] {
+        display: none !important;
+    }
+
+    /* Zonas táctiles mínimas (~44px según guías iOS/Android) */
+    .btn {
+        min-height: 44px;
+    }
+
+    .btn-sm {
+        min-height: 40px;
+    }
+
+    .btn-close,
+    .modal-close,
+    .btn-icon-only {
+        min-width: 44px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-icon-sm {
+        min-width: 40px;
+        min-height: 40px;
+    }
+
+    .year-nav-btn {
+        min-width: 40px;
+        min-height: 40px;
+    }
+
+    .month-selector-button {
+        min-height: 44px;
+    }
+
+    .month-day-cell {
+        min-height: 56px;
+    }
+
+    .month-day-badge {
+        font-size: 0.75rem;
+        font-weight: 700;
+        background: rgba(16, 185, 129, 0.18);
+    }
+
+    /* Hora de la clase más legible en la vista de día */
+    .class-card-time {
+        font-size: 0.85rem;
+    }
+
+    /* Feedback al tocar una hora libre en la vista de día (crear clase) */
+    .day-view-day-column .calendar-cell:active {
+        background: var(--gray-100);
+    }
+
+    /* Modales: aprovechar la altura real del viewport y evitar que la fila
+       de botones (p.ej. Cerrar/Eliminar/Editar) desborde en pantallas estrechas */
+    .modal {
+        padding: var(--spacing-sm);
+    }
+
+    .modal-content {
+        max-height: calc(100dvh - 1rem);
+    }
+
+    .modal-actions {
+        flex-wrap: wrap;
+    }
+
+    .modal-actions .btn {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+
+    /* El dropdown de alumnos nunca más ancho que la pantalla */
+    .students-dropdown {
+        width: min(340px, calc(100vw - 2rem));
+    }
+
+    /* Header más compacto */
+    .user-display {
+        font-size: var(--font-size-sm);
+        padding: var(--spacing-xs) var(--spacing-sm);
+    }
+
+    .weather-widget {
+        font-size: var(--font-size-xs);
     }
 }
 
@@ -2206,10 +2325,11 @@ form {
     }
 
     .header-actions {
-        flex-direction: column;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
         gap: var(--spacing-sm);
         width: 100%;
-        align-items: stretch;
     }
 
     .header-actions .btn {
@@ -2724,6 +2844,23 @@ form {
     color: white;
 }
 
+/* En móvil las 5 pestañas no caben: carrusel horizontal con scroll */
+@media (max-width: 768px) {
+    .recepcion-tabs {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap;
+    }
+
+    .recepcion-tab {
+        flex: 0 0 auto;
+        white-space: nowrap;
+        min-height: 44px;
+    }
+}
+
 .matches-toolbar {
     display: flex;
     justify-content: flex-end;
@@ -3072,6 +3209,16 @@ form {
 }
 
 .match-result-team-btn:hover .match-result-win {
+    opacity: 1;
+}
+
+/* En pantallas táctiles no hay hover: mismo feedback al pulsar */
+.match-result-team-btn:active {
+    border-color: var(--primary-green);
+    background: #f0fdf4;
+}
+
+.match-result-team-btn:active .match-result-win {
     opacity: 1;
 }
 
