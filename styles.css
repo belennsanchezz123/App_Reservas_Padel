@@ -938,6 +938,57 @@ body {
     margin-bottom: var(--spacing-lg);
 }
 
+/* --- Scroll continuo de meses (estilo calendario de iOS/iCloud) --- */
+.month-scroll-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--spacing-sm);
+}
+
+.month-scroll-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    padding: 4px 0 6px;
+    border-bottom: 1px solid var(--gray-200);
+    margin-bottom: var(--spacing-xs);
+}
+
+.month-scroll-weekdays span {
+    text-align: center;
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    color: var(--gray-500);
+    text-transform: uppercase;
+}
+
+.month-scroll-container {
+    position: relative;
+    max-height: 48vh;
+    max-height: 48dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* que el scroll de meses no arrastre consigo el scroll de la página */
+    overscroll-behavior: contain;
+}
+
+.month-section {
+    /* padding (no margin) para que la compensación de scroll al cargar
+       meses hacia arriba coincida con offsetHeight */
+    padding-bottom: var(--spacing-md);
+}
+
+.month-section-title {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--gray-100);
+    font-weight: 700;
+    font-size: var(--font-size-base);
+    color: var(--gray-800);
+    padding: 6px 2px;
+}
+
 .month-calendar-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
@@ -1008,6 +1059,155 @@ body {
     font-size: var(--font-size-lg);
     margin-bottom: var(--spacing-md);
     color: var(--gray-900);
+}
+
+/* Barra superior de la vista de día (estilo iOS):
+   "‹ Mes" a la izquierda · buscar y "+" a la derecha */
+.day-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 999px;
+    padding: 8px 16px 8px 12px;
+    min-height: 44px;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--gray-800);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: background var(--transition-fast);
+}
+
+.day-back-btn:active {
+    background: var(--gray-100);
+}
+
+.day-back-chevron {
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--primary-green);
+    font-weight: 700;
+}
+
+.day-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.day-icon-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: white;
+    border: 1px solid var(--gray-200);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: background var(--transition-fast);
+}
+
+.day-icon-btn:active {
+    background: var(--gray-100);
+}
+
+/* --- Búsqueda de clases por alumno (modal del botón 🔍) --- */
+.search-classes-results {
+    max-height: 60vh;
+    max-height: 60dvh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.search-classes-hint {
+    color: var(--gray-500);
+    font-size: var(--font-size-sm);
+    padding: var(--spacing-sm) 0;
+}
+
+.search-student-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.search-student-name {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-weight: 700;
+    color: var(--gray-900);
+    padding-bottom: 4px;
+    border-bottom: 2px solid var(--gray-100);
+}
+
+.search-student-count {
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    color: var(--primary-green-dark);
+    background: #ecfdf5;
+    border-radius: 999px;
+    padding: 2px 10px;
+    white-space: nowrap;
+}
+
+.search-class-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
+    text-align: left;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    min-height: 44px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background var(--transition-fast);
+}
+
+.search-class-item:hover,
+.search-class-item:active {
+    background: var(--gray-100);
+}
+
+.search-class-item.past {
+    opacity: 0.6;
+}
+
+.search-class-date {
+    font-weight: 600;
+    font-size: var(--font-size-sm);
+    color: var(--gray-800);
+}
+
+.search-class-meta {
+    font-size: var(--font-size-xs);
+    color: var(--gray-600);
+}
+
+/* Botón "+" circular del panel del día (añadir clase al día seleccionado) */
+#addClassFromDayViewBtn {
+    min-width: 44px;
+    min-height: 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+    font-size: 1.4rem;
+    line-height: 1;
+    flex-shrink: 0;
 }
 
 .day-classes-list {
@@ -1615,6 +1815,15 @@ form {
 @media (max-width: 768px) {
     .header {
         padding: var(--spacing-md);
+        /* En móvil el header no va fijo: se desplaza con la página para no
+           tapar el calendario ni robar altura de pantalla */
+        position: static;
+    }
+
+    /* Sin botón "Nueva Clase" permanente: en móvil las clases se crean desde
+       el "+" del panel del día (aparece al tocar un día del calendario) */
+    #addClassBtn {
+        display: none !important;
     }
 
     .header-content {
@@ -1648,19 +1857,21 @@ form {
         display: none !important;
     }
 
-    /* Hacer el selector de mes más visible y fácil de pulsar en móvil */
-    #monthSelector {
-        width: 100%;
-        display: flex;
-        justify-content: center;
+    /* El selector de mes/año se sustituye en móvil por el scroll continuo
+       de meses (estilo iOS): bajar con el dedo va pasando los meses */
+    #monthYearSelector {
+        display: none !important;
     }
 
-    #monthSelectorButton {
-        width: 100%;
-        justify-content: center;
-        padding: 6px 10px;
-        border: 1px solid var(--gray-200);
-        background: white;
+    /* Con todo su contenido oculto en móvil, la barra de navegación semanal
+       quedaba como una caja blanca vacía: fuera entera */
+    .week-navigation {
+        display: none;
+    }
+
+    /* Sin leyenda de colores en móvil: ahorra espacio vertical */
+    .legend {
+        display: none;
     }
 
     .calendar-grid {
@@ -1676,7 +1887,8 @@ form {
         display: block;
     }
 
-    .day-classes-panel {
+    /* El panel del día solo aparece tras tocar un día en el calendario */
+    .day-classes-panel.visible {
         display: block;
         margin-top: var(--spacing-md);
     }

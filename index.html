@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agridulce Padel Club</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=25">
+    <link rel="stylesheet" href="styles.css?v=31">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -335,12 +335,19 @@
                     </div>
                 </div>
 
-                <!-- Selected Day View (mobile) -->
+                <!-- Selected Day View (mobile) — vista completa estilo iOS -->
                 <div class="day-classes-panel" id="dayClassesPanel">
                     <div class="day-classes-header">
-                        <h3 class="day-classes-title" id="dayClassesTitle">Clases del día</h3>
-                        <button class="btn btn-primary btn-sm" id="addClassFromDayViewBtn" type="button">+ Nueva clase</button>
+                        <button class="day-back-btn" id="dayBackBtn" type="button" aria-label="Volver al calendario mensual">
+                            <span class="day-back-chevron">‹</span>
+                            <span id="dayBackMonthLabel">Mes</span>
+                        </button>
+                        <div class="day-header-actions">
+                            <button class="day-icon-btn" id="daySearchBtn" type="button" title="Buscar clases por alumno" aria-label="Buscar clases por alumno">🔍</button>
+                            <button class="btn btn-primary btn-sm" id="addClassFromDayViewBtn" type="button" title="Añadir clase en este día" aria-label="Añadir clase en este día">+</button>
+                        </div>
                     </div>
+                    <h3 class="day-classes-title" id="dayClassesTitle">Clases del día</h3>
                     <div class="day-view-grid" id="dayViewGrid">
                         <!-- Day time grid injected by JS -->
                     </div>
@@ -869,6 +876,22 @@
         </div>
     </div>
 
+    <!-- Modal: Buscar clases por alumno -->
+    <div class="modal" id="searchClassesModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔍 Buscar clases</h3>
+                <button class="btn-close" onclick="closeModal('searchClassesModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group" style="margin-bottom: var(--spacing-sm);">
+                    <input type="search" id="searchClassesInput" placeholder="Nombre o apellidos del alumno..." autocomplete="off">
+                </div>
+                <div id="searchClassesResults" class="search-classes-results"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
 
@@ -883,7 +906,7 @@
     <!-- 3. Then load database layer -->
     <script src="db.js?v=24"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=25"></script>
+    <script src="app.js?v=29"></script>
     <!-- 5. Torneos (depende de app.js y db.js) -->
     <script src="tournaments.js?v=24"></script>
 </body>

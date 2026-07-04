@@ -780,7 +780,7 @@ function loadFromLocalStorage() {
 
 function renderCalendar() {
     const grid = document.getElementById('calendarGrid');
-    const monthGrid = document.getElementById('monthCalendarGrid');
+    const monthWrapper = document.getElementById('monthCalendarWrapper');
 
     if (!appState.currentWeekStart) {
         appState.currentWeekStart = getMonday(new Date());
@@ -792,7 +792,7 @@ function renderCalendar() {
 
     const isMobile = window.innerWidth <= 768;
 
-    if (isMobile && monthGrid) {
+    if (isMobile && monthWrapper) {
         renderMonthCalendar();
     }
 
@@ -830,26 +830,32 @@ function getClassesForDate(targetDate) {
     return classes;
 }
 
-function renderMonthCalendar() {
-    const monthGrid = document.getElementById('monthCalendarGrid');
-    if (!monthGrid) return;
+// ==========================================
+// CALENDARIO MENSUAL MÓVIL — scroll continuo de meses (estilo iOS/iCloud)
+// Se baja con el dedo y van apareciendo los meses siguientes/anteriores.
+// Estado de UI local (rango de meses renderizados); no duplica datos de appState.
+// ==========================================
+let monthScrollRange = null;    // { start: Date, end: Date } — día 1 de cada mes
+let monthScrollLoading = false; // evita cargas dobles durante el scroll
+let dayPanelOpen = false;       // el panel del día solo se muestra tras tocar un día
 
-    const baseDate = new Date(appState.currentMonthDate || new Date());
-    const year = baseDate.getFullYear();
-    const month = baseDate.getMonth();
+function buildMonthSection(year, month) {
+    const section = document.createElement('div');
+    section.className = 'month-section';
+    section.dataset.year = String(year);
+    section.dataset.month = String(month);
+
+    const title = document.createElement('div');
+    title.className = 'month-section-title';
+    title.textContent = formatMonthYearSpanish(new Date(year, month, 1));
+    section.appendChild(title);
+
+    const grid = document.createElement('div');
+    grid.className = 'month-calendar-grid';
 
     const firstOfMonth = new Date(year, month, 1);
     const startDay = (firstOfMonth.getDay() + 6) % 7; // 0 = lunes
-
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-    const monthTitleEl = document.getElementById('monthTitle');
-    if (monthTitleEl) {
-        monthTitleEl.textContent = formatMonthYearSpanish(baseDate);
-        monthTitleEl.setAttribute('aria-hidden', 'false');
-    }
-
-    monthGrid.innerHTML = '';
 
     const todayStr = formatDateISO(new Date());
     const selectedDayStr = appState.selectedDayDate ? formatDateISO(appState.selectedDayDate) : null;
@@ -862,7 +868,7 @@ function renderMonthCalendar() {
         const dayNumber = cellIndex - startDay + 1;
         if (dayNumber < 1 || dayNumber > daysInMonth) {
             cell.classList.add('empty');
-            monthGrid.appendChild(cell);
+            grid.appendChild(cell);
             continue;
         }
 
@@ -870,17 +876,10 @@ function renderMonthCalendar() {
         const cellDateStr = formatDateISO(cellDate);
 
         const classesForDay = getClassesForDate(cellDate);
-
         const hasClasses = classesForDay.length > 0;
         if (hasClasses) cell.classList.add('has-classes');
-
-        if (cellDateStr === todayStr) {
-            cell.classList.add('today');
-        }
-
-        if (selectedDayStr && cellDateStr === selectedDayStr) {
-            cell.classList.add('selected-day');
-        }
+        if (cellDateStr === todayStr) cell.classList.add('today');
+        if (selectedDayStr && cellDateStr === selectedDayStr) cell.classList.add('selected-day');
 
         const dayLabel = document.createElement('div');
         dayLabel.className = 'month-day-number';
@@ -890,25 +889,164 @@ function renderMonthCalendar() {
         if (hasClasses) {
             const badge = document.createElement('div');
             badge.className = 'month-day-badge';
-            // En móvil solo mostramos el número de clases (ej: "3")
             badge.textContent = `${classesForDay.length}`;
             cell.appendChild(badge);
         }
 
         cell.addEventListener('click', () => {
             appState.selectedDayDate = cellDate.toISOString();
+            appState.currentMonthDate = new Date(year, month, 1);
+            dayPanelOpen = true;
             renderDayClassesPanel(cellDate);
-            // Re-render month to actualizar el resaltado del día seleccionado
-            renderMonthCalendar();
+            // Actualizar el resaltado sin reconstruir la lista (conserva el scroll)
+            const container = document.getElementById('monthScrollContainer');
+            if (container) {
+                const prev = container.querySelector('.month-day-cell.selected-day');
+                if (prev) prev.classList.remove('selected-day');
+            }
+            cell.classList.add('selected-day');
         });
 
-        monthGrid.appendChild(cell);
+        grid.appendChild(cell);
+    }
+
+    section.appendChild(grid);
+    return section;
+}
+
+function onMonthScroll() {
+    const container = document.getElementById('monthScrollContainer');
+    if (!container || monthScrollLoading || !monthScrollRange) return;
+
+    // Mes "visible": la última sección cuyo inicio queda por encima del corte
+    const sections = container.querySelectorAll('.month-section');
+    let visible = null;
+    const cutoff = container.scrollTop + 60;
+    sections.forEach(sec => {
+        if (sec.offsetTop <= cutoff) visible = sec;
+    });
+    if (visible) {
+        appState.currentMonthDate = new Date(
+            parseInt(visible.dataset.year, 10),
+            parseInt(visible.dataset.month, 10),
+            1
+        );
+    }
+
+    const nearTop = container.scrollTop < 150;
+    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+
+    if (nearTop) {
+        // Cargar el mes anterior arriba, compensando el scroll para que no salte
+        monthScrollLoading = true;
+        const s = monthScrollRange.start;
+        const prev = new Date(s.getFullYear(), s.getMonth() - 1, 1);
+        monthScrollRange.start = prev;
+        const section = buildMonthSection(prev.getFullYear(), prev.getMonth());
+        container.insertBefore(section, container.firstChild);
+        container.scrollTop += section.offsetHeight;
+        monthScrollLoading = false;
+    } else if (nearBottom) {
+        monthScrollLoading = true;
+        const e = monthScrollRange.end;
+        const next = new Date(e.getFullYear(), e.getMonth() + 1, 1);
+        monthScrollRange.end = next;
+        container.appendChild(buildMonthSection(next.getFullYear(), next.getMonth()));
+        monthScrollLoading = false;
+    }
+}
+
+function renderMonthCalendar() {
+    const wrapper = document.getElementById('monthCalendarWrapper');
+    if (!wrapper) return;
+
+    const baseDate = new Date(appState.currentMonthDate || new Date());
+    const baseMonth = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+
+    // Rango inicial: un mes antes y dos después del mes base. Si el mes base
+    // sale del rango cargado (p.ej. botón "Hoy"), se recentra.
+    const outOfRange = monthScrollRange &&
+        (baseMonth < monthScrollRange.start || baseMonth > monthScrollRange.end);
+    let needsScrollToBase = false;
+    if (!monthScrollRange || outOfRange) {
+        monthScrollRange = {
+            start: new Date(baseMonth.getFullYear(), baseMonth.getMonth() - 1, 1),
+            end: new Date(baseMonth.getFullYear(), baseMonth.getMonth() + 2, 1)
+        };
+        needsScrollToBase = true;
+    }
+
+    let container = document.getElementById('monthScrollContainer');
+    if (!container) {
+        // Primera construcción: toolbar ("Hoy"), cabecera de días y contenedor
+        wrapper.innerHTML = '';
+        needsScrollToBase = true;
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'month-scroll-toolbar';
+        const todayBtn = document.createElement('button');
+        todayBtn.type = 'button';
+        todayBtn.id = 'monthScrollTodayBtn';
+        todayBtn.className = 'btn btn-secondary btn-sm';
+        todayBtn.textContent = 'Hoy';
+        todayBtn.addEventListener('click', () => {
+            const now = new Date();
+            appState.currentMonthDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            appState.selectedDayDate = now.toISOString();
+            monthScrollRange = null; // fuerza rango nuevo centrado en hoy
+            dayPanelOpen = true;     // "Hoy" equivale a seleccionar el día de hoy
+            renderMonthCalendar();
+        });
+        toolbar.appendChild(todayBtn);
+        wrapper.appendChild(toolbar);
+
+        const weekdays = document.createElement('div');
+        weekdays.className = 'month-scroll-weekdays';
+        ['L', 'M', 'X', 'J', 'V', 'S', 'D'].forEach(d => {
+            const s = document.createElement('span');
+            s.textContent = d;
+            weekdays.appendChild(s);
+        });
+        wrapper.appendChild(weekdays);
+
+        container = document.createElement('div');
+        container.id = 'monthScrollContainer';
+        container.className = 'month-scroll-container';
+        container.addEventListener('scroll', onMonthScroll, { passive: true });
+        wrapper.appendChild(container);
+    }
+
+    const prevScrollTop = container.scrollTop;
+    container.innerHTML = '';
+    const cursor = new Date(monthScrollRange.start);
+    while (cursor <= monthScrollRange.end) {
+        container.appendChild(buildMonthSection(cursor.getFullYear(), cursor.getMonth()));
+        cursor.setMonth(cursor.getMonth() + 1);
+    }
+
+    if (needsScrollToBase) {
+        const target = container.querySelector(
+            `.month-section[data-year="${baseMonth.getFullYear()}"][data-month="${baseMonth.getMonth()}"]`
+        );
+        if (target) container.scrollTop = target.offsetTop;
+    } else {
+        // Re-render por cambio de datos: conservar la posición de scroll
+        container.scrollTop = prevScrollTop;
     }
 
     if (!appState.selectedDayDate) {
-        appState.selectedDayDate = new Date(year, month, new Date().getDate()).toISOString();
+        appState.selectedDayDate = new Date().toISOString();
     }
-    renderDayClassesPanel(new Date(appState.selectedDayDate));
+
+    // Vista de día abierta → refrescarla (el mes queda oculto detrás);
+    // si no, asegurar que el calendario mensual está visible
+    if (dayPanelOpen) {
+        renderDayClassesPanel(new Date(appState.selectedDayDate));
+    } else {
+        const panel = document.getElementById('dayClassesPanel');
+        if (panel) panel.classList.remove('visible');
+        wrapper.style.display = '';
+    }
 }
 
 function getClassesForDateAndHour(date, hour) {
@@ -926,9 +1064,18 @@ function renderDayClassesPanel(date) {
     const gridEl = document.getElementById('dayViewGrid');
     if (!panel || !titleEl || !gridEl) return;
 
+    panel.classList.add('visible');
+
     const d = new Date(date);
     const weekdayIndex = (d.getDay() + 6) % 7; // 0=Lunes
     const weekdayName = CONFIG.days[weekdayIndex];
+
+    // Vista de día a pantalla completa (estilo iOS): se oculta el calendario
+    // mensual y el botón "‹ Mes" permite volver a él
+    const monthWrapper = document.getElementById('monthCalendarWrapper');
+    if (monthWrapper) monthWrapper.style.display = 'none';
+    const backLabel = document.getElementById('dayBackMonthLabel');
+    if (backLabel) backLabel.textContent = formatMonthYearSpanish(d).split(' ')[0];
 
     // Alinear la semana activa con el día mostrado: tanto el guardado del
     // formulario de clase como el drag táctil calculan la fecha final a
@@ -998,6 +1145,115 @@ function renderDayClassesPanel(date) {
 
     // Guardar el día actualmente mostrado para el botón de añadir desde vista diaria
     appState.selectedDayDate = d.toISOString();
+}
+
+// ==========================================
+// BÚSQUEDA DE CLASES POR ALUMNO (botón 🔍 de la vista de día)
+// ==========================================
+
+// Sin tildes, sin mayúsculas: "garcía" y "Garcia" encuentran lo mismo
+function normalizeSearchText(str) {
+    return String(str || '')
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function getClassesForStudent(studentId) {
+    let classes = appState.classes.filter(c => Array.isArray(c.students) && c.students.includes(studentId));
+    // Un monitor solo ve sus propias clases, igual que en el calendario
+    if (isMonitor()) {
+        const currentUser = getCurrentUser();
+        classes = classes.filter(c => c.monitorId === currentUser.id);
+    }
+    return classes;
+}
+
+function openSearchClassesModal() {
+    const input = document.getElementById('searchClassesInput');
+    const results = document.getElementById('searchClassesResults');
+    if (input) input.value = '';
+    if (results) results.innerHTML = '<p class="search-classes-hint">Escribe el nombre o apellidos de un alumno para ver sus clases.</p>';
+    openModal('searchClassesModal');
+    if (input) setTimeout(() => input.focus(), 150);
+}
+
+function renderSearchClassesResults() {
+    const input = document.getElementById('searchClassesInput');
+    const container = document.getElementById('searchClassesResults');
+    if (!input || !container) return;
+
+    const query = normalizeSearchText(input.value);
+    container.innerHTML = '';
+
+    if (query.length < 2) {
+        container.innerHTML = '<p class="search-classes-hint">Escribe al menos 2 letras del nombre o apellidos.</p>';
+        return;
+    }
+
+    const matches = appState.students.filter(s =>
+        s.active !== false && normalizeSearchText(s.name).includes(query)
+    );
+
+    if (matches.length === 0) {
+        container.innerHTML = '<p class="search-classes-hint">No se encontró ningún alumno con ese nombre.</p>';
+        return;
+    }
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    matches.slice(0, 6).forEach(student => {
+        const group = document.createElement('div');
+        group.className = 'search-student-group';
+
+        const classes = getClassesForStudent(student.id);
+
+        const header = document.createElement('div');
+        header.className = 'search-student-name';
+        header.innerHTML = `<span>${student.name}</span><span class="search-student-count">${classes.length} ${classes.length === 1 ? 'clase' : 'clases'}</span>`;
+        group.appendChild(header);
+
+        if (classes.length === 0) {
+            const none = document.createElement('p');
+            none.className = 'search-classes-hint';
+            none.textContent = 'Sin clases asignadas.';
+            group.appendChild(none);
+        } else {
+            // Próximas primero (más cercana arriba), luego pasadas (más reciente arriba)
+            const upcoming = classes
+                .filter(c => new Date(c.date) >= todayStart)
+                .sort((a, b) => (new Date(a.date) - new Date(b.date)) ||
+                    (timeStringToMinutes(a.startTime) - timeStringToMinutes(b.startTime)));
+            const past = classes
+                .filter(c => new Date(c.date) < todayStart)
+                .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            [...upcoming, ...past].forEach(cls => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'search-class-item';
+                const clsDate = new Date(cls.date);
+                if (clsDate < todayStart) item.classList.add('past');
+
+                const clsWeekday = CONFIG.days[(clsDate.getDay() + 6) % 7];
+                const monitorInfo = (isCoordinator() && cls.monitorName) ? ` · 👤 ${cls.monitorName}` : '';
+                const doneMark = cls.isCompleted ? ' ✓' : '';
+                item.innerHTML = `
+                    <span class="search-class-date">${clsWeekday} ${formatDate(clsDate)}</span>
+                    <span class="search-class-meta">${cls.startTime}–${cls.endTime} · ${(cls.students || []).length}/${cls.maxCapacity}${monitorInfo}${doneMark}</span>
+                `;
+                item.addEventListener('click', () => {
+                    closeModal('searchClassesModal');
+                    showClassDetails(cls.id);
+                });
+                group.appendChild(item);
+            });
+        }
+
+        container.appendChild(group);
+    });
 }
 
 function renderTimeColumn(grid) {
@@ -4680,6 +4936,24 @@ function initializeEventListeners() {
 
             // Abrimos el modal de nueva clase con el día y la hora sugeridos
             openAddClassModal(weekdayName, clampedHour);
+        });
+    }
+
+    // Búsqueda de clases por alumno (botón 🔍 de la vista de día)
+    const daySearchBtnEl = getEl('daySearchBtn');
+    if (daySearchBtnEl) daySearchBtnEl.addEventListener('click', openSearchClassesModal);
+    const searchClassesInputEl = getEl('searchClassesInput');
+    if (searchClassesInputEl) searchClassesInputEl.addEventListener('input', renderSearchClassesResults);
+
+    // Botón "‹ Mes": volver de la vista de día al calendario mensual
+    const dayBackBtnEl = getEl('dayBackBtn');
+    if (dayBackBtnEl) {
+        dayBackBtnEl.addEventListener('click', () => {
+            dayPanelOpen = false;
+            const panel = getEl('dayClassesPanel');
+            if (panel) panel.classList.remove('visible');
+            const monthWrapper = getEl('monthCalendarWrapper');
+            if (monthWrapper) monthWrapper.style.display = '';
         });
     }
 
