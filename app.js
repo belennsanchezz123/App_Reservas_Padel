@@ -1288,6 +1288,13 @@ function renderDayColumn(grid, dayIndex) {
         <span class="day-header-name">${dayName}</span>
         <span class="day-header-date">${formatDate(date)}</span>
     `;
+
+    // Resaltar la columna del día actual
+    if (isSameCalendarDay(date, new Date())) {
+        dayColumn.classList.add('today-column');
+        header.classList.add('today');
+    }
+
     dayColumn.appendChild(header);
 
     for (let hour = CONFIG.hoursStart; hour < CONFIG.hoursEnd; hour++) {

@@ -155,6 +155,8 @@ body {
    ========================================== */
 .header {
     background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     color: #1a2332;
     padding: var(--spacing-md) var(--spacing-xl);
     border-bottom: 3px solid var(--primary-green);
@@ -429,27 +431,71 @@ body {
     flex: 1;
 }
 
+/* Barra de navegación semanal (escritorio). En móvil se oculta entera
+   dentro del bloque @media (max-width: 768px). */
 .week-navigation {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: var(--spacing-md);
+    flex-wrap: wrap;
     margin-bottom: var(--spacing-lg);
     background: white;
-    padding: var(--spacing-lg);
+    padding: var(--spacing-md) var(--spacing-lg);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-md);
 }
 
-/* Ocultar controles de navegación semanal (prev/next, semana, hoy, copiar, snap)
-   en todas las vistas para dejar solo el mes y el calendario */
-#prevWeekBtn,
-#nextWeekBtn,
-#weekTitle,
-#todayBtn,
-#copyWeekBtn,
-#snapToggleBtn {
-    display: none !important;
+.week-nav-group {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+/* Botones circulares ← → para cambiar de semana */
+.btn-nav-icon {
+    width: 38px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 50%;
+    font-size: 1.05rem;
+    color: var(--gray-700);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.btn-nav-icon:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+    color: var(--gray-900);
+}
+
+.btn-today {
+    background: white;
+    border: 1px solid var(--gray-200);
+    color: var(--primary-green-dark);
+    font-weight: 700;
+}
+
+.btn-today:hover {
+    border-color: var(--primary-green);
+    background: #f0fdf4;
+}
+
+.btn-copy-week {
+    background: white;
+    border: 1px solid var(--gray-200);
+    color: var(--gray-600);
+}
+
+.btn-copy-week:hover {
+    border-color: var(--gray-300);
+    color: var(--gray-800);
 }
 
 .week-info {
@@ -461,7 +507,10 @@ body {
 
 .week-info h2 {
     font-size: var(--font-size-xl);
+    font-weight: 700;
+    letter-spacing: -0.3px;
     color: var(--gray-900);
+    white-space: nowrap;
 }
 
 .quick-actions {
@@ -630,12 +679,44 @@ body {
     position: relative;
 }
 
+/* Columna del día actual resaltada en la vista semanal */
+.day-header.today {
+    background: var(--primary-green);
+    border-bottom-color: var(--primary-green-dark);
+}
+
+.today-column .calendar-cell {
+    background: #f6fdf9;
+}
+
+.today-column .calendar-cell:hover {
+    background: #ecfdf5;
+}
+
+/* Afordancia de creación: "+" al pasar el ratón por un hueco libre */
+@media (hover: hover) {
+    .day-column .calendar-cell:not(.has-class):hover::after {
+        content: '+';
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: var(--primary-green);
+        background: rgba(16, 185, 129, 0.07);
+        pointer-events: none;
+    }
+}
+
 /* ==========================================
    CLASS CARDS IN CALENDAR
    ========================================== */
 .class-card {
     padding: 0.35rem 0.5rem;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
     font-size: 0.9rem;
     display: block;
     position: absolute;
@@ -741,6 +822,12 @@ body {
     color: var(--gray-700);
 }
 
+/* En tarjetas claras el chip de ocupación blanco no se leía */
+.class-empty .class-card-occupancy {
+    color: var(--gray-700);
+    background: rgba(0, 0, 0, 0.06);
+}
+
 .class-card-time {
     font-weight: 700;
     font-size: 0.78rem;
@@ -823,44 +910,61 @@ body {
     color: var(--gray-700);
 }
 
+/* Control unificado "Mes ▾ | ‹ Año ›" en una sola píldora */
+.month-year-selector {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 999px;
+    padding: 3px 6px;
+    box-shadow: var(--shadow-sm);
+}
+
 .month-selector {
     position: relative;
     display: inline-block;
-    margin-top: 4px;
 }
 
 .year-selector {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    margin-top: 4px;
+    gap: 2px;
+    border-left: 1px solid var(--gray-200);
+    padding-left: 6px;
+    margin-left: 4px;
 }
 
 .year-title {
-    font-size: 1.1rem;
+    font-size: 1rem;
     font-weight: 600;
     color: var(--gray-800);
-    min-width: 3rem;
+    min-width: 2.8rem;
     text-align: center;
 }
 
 .year-nav-btn {
-    background: white;
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius-sm);
-    padding: 2px 8px;
-    font-size: 1.2rem;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
     font-weight: 700;
-    color: var(--gray-700);
+    color: var(--gray-500);
     cursor: pointer;
-    line-height: 1.4;
-    box-shadow: var(--shadow-sm);
-    transition: background var(--transition-fast), border-color var(--transition-fast);
+    line-height: 1;
+    transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .year-nav-btn:hover {
     background: var(--gray-100);
-    border-color: var(--gray-300);
+    color: var(--gray-800);
 }
 
 .month-selector-button {
@@ -882,19 +986,19 @@ body {
 
 
 .month-selector-button {
-    background: white;
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius-md);
-    padding: 6px 18px 6px 12px;
-    font-size: 1.1rem;
+    background: transparent;
+    border: none;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 1rem;
     font-weight: 600;
     color: var(--gray-800);
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 8px;
-    box-shadow: var(--shadow-sm);
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    gap: 6px;
+    box-shadow: none;
+    transition: background var(--transition-fast);
     outline: none;
 }
 
@@ -2009,6 +2113,73 @@ form {
 }
 
 /* ==========================================
+   PULIDO ESCRITORIO: scrollbars, foco, snap
+   ========================================== */
+
+/* Scrollbars finos y discretos en los contenedores con scroll propio */
+.calendar-container::-webkit-scrollbar,
+.students-list::-webkit-scrollbar,
+.day-view-grid::-webkit-scrollbar,
+.month-scroll-container::-webkit-scrollbar,
+.search-classes-results::-webkit-scrollbar,
+.matches-calendar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.calendar-container::-webkit-scrollbar-thumb,
+.students-list::-webkit-scrollbar-thumb,
+.day-view-grid::-webkit-scrollbar-thumb,
+.month-scroll-container::-webkit-scrollbar-thumb,
+.search-classes-results::-webkit-scrollbar-thumb,
+.matches-calendar::-webkit-scrollbar-thumb {
+    background: var(--gray-300);
+    border-radius: 999px;
+}
+
+.calendar-container::-webkit-scrollbar-thumb:hover,
+.students-list::-webkit-scrollbar-thumb:hover,
+.day-view-grid::-webkit-scrollbar-thumb:hover,
+.month-scroll-container::-webkit-scrollbar-thumb:hover,
+.search-classes-results::-webkit-scrollbar-thumb:hover,
+.matches-calendar::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-400);
+}
+
+.calendar-container::-webkit-scrollbar-track,
+.students-list::-webkit-scrollbar-track,
+.day-view-grid::-webkit-scrollbar-track,
+.month-scroll-container::-webkit-scrollbar-track,
+.search-classes-results::-webkit-scrollbar-track,
+.matches-calendar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* Anillo de foco visible al navegar con teclado */
+.btn:focus-visible,
+.btn-nav-icon:focus-visible,
+.month-selector-button:focus-visible,
+.year-nav-btn:focus-visible,
+.day-icon-btn:focus-visible,
+.day-back-btn:focus-visible,
+.recepcion-tab:focus-visible {
+    outline: 2px solid var(--primary-green);
+    outline-offset: 2px;
+}
+
+/* Botón de snap (15m/30m) que app.js añade a la barra semanal */
+#snapToggleBtn {
+    background: white;
+    border: 1px solid var(--gray-200);
+    color: var(--gray-600);
+}
+
+#snapToggleBtn:hover {
+    border-color: var(--gray-300);
+    color: var(--gray-800);
+}
+
+/* ==========================================
    UTILITY CLASSES
    ========================================== */
 .hidden {
@@ -2243,7 +2414,7 @@ form {
 .monitor-card:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-lg);
-    border-color: var(--gray-300);
+    border-color: var(--primary-green-light);
 }
 
 .monitor-card-header {

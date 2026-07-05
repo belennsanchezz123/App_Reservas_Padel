@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agridulce Padel Club</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=31">
+    <link rel="stylesheet" href="styles.css?v=32">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -251,14 +251,17 @@
             <section class="calendar-section">
                 <!-- Week Navigation / Month Header -->
                 <div class="week-navigation">
-                    <button class="btn btn-secondary" id="prevWeekBtn">
-                        <span class="btn-icon">←</span>
-                        Semana Anterior
-                    </button>
+                    <div class="week-nav-group">
+                        <button class="btn-nav-icon" id="prevWeekBtn" type="button" title="Semana anterior" aria-label="Semana anterior">←</button>
+                        <button class="btn btn-sm btn-today" id="todayBtn" type="button">Hoy</button>
+                        <button class="btn-nav-icon" id="nextWeekBtn" type="button" title="Semana siguiente" aria-label="Semana siguiente">→</button>
+                    </div>
                     <div class="week-info">
                         <h2 id="weekTitle">Semana del 13 - 19 Enero 2026</h2>
-                        <div class="month-year-selector" id="monthYearSelector" style="display:flex; gap:8px; align-items:center;">
-                            <div class="month-selector" id="monthSelector" style="position:relative;">
+                    </div>
+                    <div class="week-nav-group week-nav-right">
+                        <div class="month-year-selector" id="monthYearSelector">
+                            <div class="month-selector" id="monthSelector">
                                 <button class="month-selector-button" id="monthSelectorButton" type="button">
                                     <span id="monthTitle" class="month-title" aria-hidden="true">Febrero</span>
                                     <span class="month-selector-arrow">▾</span>
@@ -266,20 +269,13 @@
                                 <ul class="month-selector-dropdown" id="monthSelectorDropdown"></ul>
                             </div>
                             <div class="year-selector" id="yearSelector">
-                                <button class="year-nav-btn" id="yearPrevBtn" type="button">&#8249;</button>
+                                <button class="year-nav-btn" id="yearPrevBtn" type="button" title="Año anterior" aria-label="Año anterior">&#8249;</button>
                                 <span id="yearTitle" class="year-title">2026</span>
-                                <button class="year-nav-btn" id="yearNextBtn" type="button">&#8250;</button>
+                                <button class="year-nav-btn" id="yearNextBtn" type="button" title="Año siguiente" aria-label="Año siguiente">&#8250;</button>
                             </div>
                         </div>
-                        <div style="display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap;">
-                            <button class="btn btn-sm" id="todayBtn">Hoy</button>
-                            <button class="btn btn-sm" id="copyWeekBtn">Copiar semana →</button>
-                        </div>
+                        <button class="btn btn-sm btn-copy-week" id="copyWeekBtn" type="button">Copiar semana →</button>
                     </div>
-                    <button class="btn btn-secondary" id="nextWeekBtn">
-                        Semana Siguiente
-                        <span class="btn-icon">→</span>
-                    </button>
                 </div>
 
                 <!-- Quick Actions -->
@@ -293,8 +289,6 @@
                         <span class="btn-icon">👥</span>
                         Ver Alumnos
                     </button>
-                    <button class="btn btn-secondary" onclick="navigateWeek(-1)">← Semana Anterior</button>
-                    <button class="btn btn-secondary" onclick="navigateWeek(1)">Semana Siguiente →</button>
                     <!-- Students modal (opens full-screen modal) -->
                     <div class="modal" id="studentsModal">
                         <div class="modal-content" style="max-width:720px; width:90%;">
@@ -906,7 +900,7 @@
     <!-- 3. Then load database layer -->
     <script src="db.js?v=24"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=29"></script>
+    <script src="app.js?v=32"></script>
     <!-- 5. Torneos (depende de app.js y db.js) -->
     <script src="tournaments.js?v=24"></script>
 </body>
