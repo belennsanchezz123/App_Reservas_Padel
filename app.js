@@ -839,6 +839,113 @@ let monthScrollRange = null;    // { start: Date, end: Date } — día 1 de cada
 let monthScrollLoading = false; // evita cargas dobles durante el scroll
 let dayPanelOpen = false;       // el panel del día solo se muestra tras tocar un día
 
+// Nivel de zoom del mes (pellizco, estilo iOS):
+// 0 = compacto (contador de clases) · 1 = chips con nombre · 2 = chips con nombre y hora
+let monthZoomLevel = 0;
+try {
+    monthZoomLevel = Math.max(0, Math.min(2, parseInt(localStorage.getItem('padel_monthZoomLevel'), 10) || 0));
+} catch (e) { /* localStorage no disponible */ }
+
+function setMonthZoom(level) {
+    const clamped = Math.max(0, Math.min(2, level));
+    if (clamped === monthZoomLevel) return;
+    monthZoomLevel = clamped;
+    try { localStorage.setItem('padel_monthZoomLevel', String(clamped)); } catch (e) { /* noop */ }
+    if (window.navigator.vibrate) window.navigator.vibrate(20);
+    renderMonthCalendar();
+}
+
+// Cerrar la vista de día y volver al calendario mensual (botón "‹ Mes" y pellizco)
+function closeDayViewToMonth() {
+    dayPanelOpen = false;
+    const panel = document.getElementById('dayClassesPanel');
+    if (panel) panel.classList.remove('visible');
+    const monthWrapper = document.getElementById('monthCalendarWrapper');
+    if (monthWrapper) monthWrapper.style.display = '';
+}
+
+// Gesto de pellizco con dos dedos (estilo calendario de iOS):
+// separar dedos = zoom in (mes → día) · juntar dedos = zoom out (día → mes)
+function setupPinchGesture(el, handlers) {
+    let startDist = 0;
+    let active = false;
+    let fired = false;
+    let centerX = 0;
+    let centerY = 0;
+
+    function touchDistance(touches) {
+        const dx = touches[0].clientX - touches[1].clientX;
+        const dy = touches[0].clientY - touches[1].clientY;
+        return Math.hypot(dx, dy);
+    }
+
+    let prevOverflowY = '';
+    let lockTop = 0;
+    let unlockTimer = null;
+
+    // Candado de posición: iOS sigue desplazando un scroll ya iniciado aunque
+    // se cambie overflow o se llame a preventDefault. Mientras el pellizco esté
+    // activo, cualquier scroll que se cuele se revierte inmediatamente.
+    const lockScroll = () => {
+        if (el.scrollTop !== lockTop) el.scrollTop = lockTop;
+    };
+
+    el.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+            active = true;
+            fired = false;
+            startDist = touchDistance(e.touches);
+            centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+            centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+            el.dataset.pinching = '1';
+            prevOverflowY = el.style.overflowY;
+            el.style.overflowY = 'hidden';
+            clearTimeout(unlockTimer);
+            lockTop = el.scrollTop;
+            el.addEventListener('scroll', lockScroll);
+        }
+    }, { passive: true });
+
+    el.addEventListener('touchmove', (e) => {
+        if (!active || e.touches.length !== 2) return;
+        // Con dos dedos el gesto es nuestro: bloquear scroll/zoom nativo
+        e.preventDefault();
+        if (fired || startDist <= 0) return;
+        centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const ratio = touchDistance(e.touches) / startDist;
+        if (ratio > 1.25 && handlers.onZoomIn) {
+            fired = true;
+            handlers.onZoomIn(centerX, centerY);
+            // El re-render pudo recolocar el scroll (anclado al mes visible):
+            // ese nuevo valor pasa a ser la posición bloqueada
+            lockTop = el.scrollTop;
+        } else if (ratio < 0.8 && handlers.onZoomOut) {
+            fired = true;
+            handlers.onZoomOut(centerX, centerY);
+            lockTop = el.scrollTop;
+        }
+    }, { passive: false });
+
+    const resetPinch = (e) => {
+        if (!e.touches || e.touches.length < 2) {
+            if (active) {
+                el.style.overflowY = prevOverflowY || '';
+                delete el.dataset.pinching;
+                // Mantener el candado un instante más para absorber la
+                // inercia residual del scroll que iOS pueda soltar al final
+                clearTimeout(unlockTimer);
+                unlockTimer = setTimeout(() => {
+                    el.removeEventListener('scroll', lockScroll);
+                }, 250);
+            }
+            active = false;
+        }
+    };
+    el.addEventListener('touchend', resetPinch);
+    el.addEventListener('touchcancel', resetPinch);
+}
+
 function buildMonthSection(year, month) {
     const section = document.createElement('div');
     section.className = 'month-section';
@@ -887,10 +994,47 @@ function buildMonthSection(year, month) {
         cell.appendChild(dayLabel);
 
         if (hasClasses) {
-            const badge = document.createElement('div');
-            badge.className = 'month-day-badge';
-            badge.textContent = `${classesForDay.length}`;
-            cell.appendChild(badge);
+            if (monthZoomLevel === 0) {
+                // Nivel compacto: solo el número de clases
+                const badge = document.createElement('div');
+                badge.className = 'month-day-badge';
+                badge.textContent = `${classesForDay.length}`;
+                cell.appendChild(badge);
+            } else {
+                // Niveles ampliados: chips estilo iOS con el alumno (y hora en nivel 2)
+                const maxChips = monthZoomLevel === 1 ? 2 : 4;
+                classesForDay.slice(0, maxChips).forEach(cls => {
+                    const chip = document.createElement('div');
+                    chip.className = `month-event-chip chip-${getClassOccupancy(cls)}`;
+
+                    const firstStudent = (cls.students && cls.students.length > 0)
+                        ? getStudentById(cls.students[0])
+                        : null;
+                    const label = firstStudent ? firstStudent.name : 'Clase';
+                    const extraCount = (cls.students || []).length - 1;
+
+                    if (monthZoomLevel === 1) {
+                        chip.textContent = extraCount > 0 ? `${label} +${extraCount}` : label;
+                    } else {
+                        const nameEl = document.createElement('span');
+                        nameEl.className = 'chip-name';
+                        nameEl.textContent = extraCount > 0 ? `${label} +${extraCount}` : label;
+                        const timeEl = document.createElement('span');
+                        timeEl.className = 'chip-time';
+                        timeEl.textContent = cls.startTime;
+                        chip.appendChild(nameEl);
+                        chip.appendChild(timeEl);
+                    }
+                    cell.appendChild(chip);
+                });
+
+                if (classesForDay.length > maxChips) {
+                    const more = document.createElement('div');
+                    more.className = 'month-more-chip';
+                    more.textContent = `+${classesForDay.length - maxChips} más`;
+                    cell.appendChild(more);
+                }
+            }
         }
 
         cell.addEventListener('click', () => {
@@ -914,9 +1058,23 @@ function buildMonthSection(year, month) {
     return section;
 }
 
+// Velocidad del scroll para no cargar meses en pleno impulso (momentum)
+let monthScrollLastTop = 0;
+let monthScrollLastTime = 0;
+let monthScrollLastLoad = 0;
+
 function onMonthScroll() {
     const container = document.getElementById('monthScrollContainer');
     if (!container || monthScrollLoading || !monthScrollRange) return;
+    // Durante un pellizco no se navega ni se cargan meses
+    if (container.dataset.pinching === '1') return;
+
+    // Medir la velocidad del desplazamiento (px/ms)
+    const now = performance.now();
+    const dt = now - monthScrollLastTime;
+    const velocity = dt > 0 ? Math.abs(container.scrollTop - monthScrollLastTop) / dt : 0;
+    monthScrollLastTop = container.scrollTop;
+    monthScrollLastTime = now;
 
     // Mes "visible": la última sección cuyo inicio queda por encima del corte
     const sections = container.querySelectorAll('.month-section');
@@ -933,8 +1091,16 @@ function onMonthScroll() {
         );
     }
 
+    // Cargar meses SOLO con scroll pausado: un lanzamiento fuerte (momentum)
+    // se frena contra el borde de lo cargado en vez de viajar meses sin fin.
+    // 0.5 px/ms ≈ 500 px/s; además, máximo una carga cada 250 ms.
+    if (velocity > 0.5) return;
+    if (now - monthScrollLastLoad < 250) return;
+
     const nearTop = container.scrollTop < 150;
     const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+
+    if (nearTop || nearBottom) monthScrollLastLoad = now;
 
     if (nearTop) {
         // Cargar el mes anterior arriba, compensando el scroll para que no salte
@@ -1013,8 +1179,40 @@ function renderMonthCalendar() {
         container.id = 'monthScrollContainer';
         container.className = 'month-scroll-container';
         container.addEventListener('scroll', onMonthScroll, { passive: true });
+
+        // Pellizco sobre el mes: cambia el nivel de detalle de las celdas
+        // (separar dedos = más detalle · juntar dedos = más compacto)
+        setupPinchGesture(container, {
+            onZoomIn: () => setMonthZoom(monthZoomLevel + 1),
+            onZoomOut: () => setMonthZoom(monthZoomLevel - 1)
+        });
+
         wrapper.appendChild(container);
     }
+
+    // Ancla: antes de reconstruir, apuntar qué mes está visible y en qué punto
+    // proporcional. Restaurar píxeles brutos falla cuando cambia la altura de
+    // las celdas (zoom): la misma cifra caería en otro mes.
+    let anchorYm = null;
+    let anchorProgress = 0;
+    if (!needsScrollToBase) {
+        const prevSections = container.querySelectorAll('.month-section');
+        const cutoff = container.scrollTop + 40;
+        let visibleSec = null;
+        prevSections.forEach(sec => {
+            if (sec.offsetTop <= cutoff) visibleSec = sec;
+        });
+        if (visibleSec) {
+            anchorYm = { y: visibleSec.dataset.year, m: visibleSec.dataset.month };
+            anchorProgress = visibleSec.offsetHeight > 0
+                ? (container.scrollTop - visibleSec.offsetTop) / visibleSec.offsetHeight
+                : 0;
+        }
+    }
+
+    // Clase de zoom en el contenedor (controla altura de celdas y estilo de chips)
+    container.classList.remove('zoom-1', 'zoom-2');
+    if (monthZoomLevel > 0) container.classList.add(`zoom-${monthZoomLevel}`);
 
     const prevScrollTop = container.scrollTop;
     container.innerHTML = '';
@@ -1029,8 +1227,15 @@ function renderMonthCalendar() {
             `.month-section[data-year="${baseMonth.getFullYear()}"][data-month="${baseMonth.getMonth()}"]`
         );
         if (target) container.scrollTop = target.offsetTop;
+    } else if (anchorYm) {
+        // Volver al mismo mes (y al mismo punto dentro de él) tras reconstruir
+        const anchorSec = container.querySelector(
+            `.month-section[data-year="${anchorYm.y}"][data-month="${anchorYm.m}"]`
+        );
+        container.scrollTop = anchorSec
+            ? anchorSec.offsetTop + anchorProgress * anchorSec.offsetHeight
+            : prevScrollTop;
     } else {
-        // Re-render por cambio de datos: conservar la posición de scroll
         container.scrollTop = prevScrollTop;
     }
 
@@ -1124,10 +1329,54 @@ function renderDayClassesPanel(date) {
             });
             cell.classList.add('has-class');
         } else {
-            // Igual que en escritorio: tocar una hora libre crea una clase ahí
+            // Tap corto: crear clase a la hora en punto
             cell.addEventListener('click', () => {
+                if (cell.dataset.lpFired === '1') return; // ya gestionado por la pulsación larga
                 openAddClassModal(weekdayName, hour);
             });
+
+            // Pulsación larga (estilo iOS): crear clase en el cuarto de hora
+            // exacto donde está el dedo dentro de la celda
+            cell.addEventListener('touchstart', (startEv) => {
+                if (startEv.touches.length > 1) return;
+                const touch = startEv.touches[0];
+                if (!touch) return;
+                const pressX = touch.clientX;
+                const pressY = touch.clientY;
+                let movedPress = false;
+
+                const lpTimer = setTimeout(() => {
+                    if (movedPress) return;
+                    cell.dataset.lpFired = '1';
+                    setTimeout(() => { delete cell.dataset.lpFired; }, 700);
+                    if (window.navigator.vibrate) window.navigator.vibrate(30);
+
+                    const rect = cell.getBoundingClientRect();
+                    const ratio = rect.height > 0 ? (pressY - rect.top) / rect.height : 0;
+                    let minute = Math.round((ratio * 60) / 15) * 15;
+                    if (minute > 45) minute = 45;
+                    if (minute < 0) minute = 0;
+                    openAddClassModal(weekdayName, hour, minute);
+                }, 450);
+
+                const cancelPress = () => {
+                    clearTimeout(lpTimer);
+                    cell.removeEventListener('touchmove', onPressMove);
+                    cell.removeEventListener('touchend', cancelPress);
+                    cell.removeEventListener('touchcancel', cancelPress);
+                };
+                const onPressMove = (ev) => {
+                    const t = ev.touches[0];
+                    if (!t) return;
+                    if (Math.abs(t.clientX - pressX) > 10 || Math.abs(t.clientY - pressY) > 10) {
+                        movedPress = true;
+                        cancelPress();
+                    }
+                };
+                cell.addEventListener('touchmove', onPressMove, { passive: true });
+                cell.addEventListener('touchend', cancelPress);
+                cell.addEventListener('touchcancel', cancelPress);
+            }, { passive: true });
         }
 
         dayColumn.appendChild(cell);
@@ -1587,8 +1836,9 @@ function createClassCard(cls) {
 
                 document.body.style.userSelect = 'none';
                 document.body.style.webkitUserSelect = 'none';
-                
-                // Feedback táctil (opcional)
+
+                // Feedback visual y táctil al entrar en modo arrastre
+                card.classList.add('dragging-touch');
                 if (window.navigator.vibrate) window.navigator.vibrate(50);
             }, longPressDelay);
 
@@ -1661,6 +1911,7 @@ function createClassCard(cls) {
                 document.removeEventListener('touchend', onTouchEnd);
                 
                 card.style.zIndex = '';
+                card.classList.remove('dragging-touch');
                 document.body.style.userSelect = '';
                 document.body.style.webkitUserSelect = '';
 
@@ -2507,6 +2758,14 @@ function renderMonitorsList() {
 
     const monitors = appState.monitors.filter(m => (m.permissions || []).includes('monitor'));
 
+    // Subtítulo del panel con el número de monitores
+    const countLabel = document.getElementById('monitorsCountLabel');
+    if (countLabel) {
+        countLabel.textContent = monitors.length === 0
+            ? 'Sin monitores todavía'
+            : `${monitors.length} ${monitors.length === 1 ? 'monitor activo' : 'monitores activos'}`;
+    }
+
     if (monitors.length === 0) {
         container.innerHTML = '<p style="text-align: center; color: var(--gray-500); padding: 2rem;">No hay monitores registrados. Agrega el primer monitor.</p>';
         return;
@@ -2744,7 +3003,7 @@ function closeModal(modalId) {
     modal.classList.remove('active');
 }
 
-function openAddClassModal(day = '', hour = null) {
+function openAddClassModal(day = '', hour = null, minute = 0) {
     const form = document.getElementById('classForm');
     form.reset();
 
@@ -2757,10 +3016,11 @@ function openAddClassModal(day = '', hour = null) {
     }
 
     if (hour !== null) {
+        const mm = String(minute || 0).padStart(2, '0');
         document.getElementById('classStartHour').value = String(hour).padStart(2, '0');
-        document.getElementById('classStartMinute').value = '00';
+        document.getElementById('classStartMinute').value = mm;
         document.getElementById('classEndHour').value = String(hour + 1).padStart(2, '0');
-        document.getElementById('classEndMinute').value = '00';
+        document.getElementById('classEndMinute').value = mm;
     }
 
     // initialize temporary selection for this form
@@ -4954,13 +5214,13 @@ function initializeEventListeners() {
 
     // Botón "‹ Mes": volver de la vista de día al calendario mensual
     const dayBackBtnEl = getEl('dayBackBtn');
-    if (dayBackBtnEl) {
-        dayBackBtnEl.addEventListener('click', () => {
-            dayPanelOpen = false;
-            const panel = getEl('dayClassesPanel');
-            if (panel) panel.classList.remove('visible');
-            const monthWrapper = getEl('monthCalendarWrapper');
-            if (monthWrapper) monthWrapper.style.display = '';
+    if (dayBackBtnEl) dayBackBtnEl.addEventListener('click', closeDayViewToMonth);
+
+    // Pellizco juntando dedos en la vista de día → volver al mes
+    const dayViewGridEl = getEl('dayViewGrid');
+    if (dayViewGridEl) {
+        setupPinchGesture(dayViewGridEl, {
+            onZoomOut: () => closeDayViewToMonth()
         });
     }
 

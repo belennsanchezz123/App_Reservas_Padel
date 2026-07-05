@@ -296,6 +296,19 @@ body {
     font-size: var(--font-size-sm);
 }
 
+/* Botón "fantasma": acción secundaria discreta (blanco, borde suave) */
+.btn-ghost {
+    background: white;
+    border: 1px solid var(--gray-200);
+    color: var(--gray-700);
+}
+
+.btn-ghost:hover {
+    background: var(--gray-50);
+    border-color: var(--gray-300);
+    color: var(--gray-900);
+}
+
 .btn-icon {
     font-size: var(--font-size-lg);
 }
@@ -739,6 +752,13 @@ body {
     transition: none !important;
 }
 
+/* Modo arrastre táctil activado (pulsación larga): la tarjeta "se levanta" */
+.class-card.dragging-touch {
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+    opacity: 0.92;
+    filter: brightness(1.05);
+}
+
 .class-card::before {
     content: '';
     position: absolute;
@@ -1051,7 +1071,7 @@ body {
 
 .month-scroll-weekdays {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 4px;
     padding: 4px 0 6px;
     border-bottom: 1px solid var(--gray-200);
@@ -1071,9 +1091,13 @@ body {
     max-height: 48vh;
     max-height: 48dvh;
     overflow-y: auto;
+    /* nunca scroll horizontal: las columnas no pueden crecer */
+    overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
     /* que el scroll de meses no arrastre consigo el scroll de la página */
     overscroll-behavior: contain;
+    /* un dedo = scroll vertical; dos dedos = pellizco gestionado por JS */
+    touch-action: pan-y;
 }
 
 .month-section {
@@ -1095,7 +1119,9 @@ body {
 
 .month-calendar-grid {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    /* minmax(0,1fr): las 7 columnas SIEMPRE miden lo mismo; un nombre largo
+       no puede ensanchar su columna (se trunca con ellipsis) */
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 4px;
 }
 
@@ -1103,7 +1129,11 @@ body {
     background: white;
     border-radius: var(--radius-sm);
     padding: 0.35rem;
-    min-height: 52px;
+    /* Altura FIJA: los días sin clases miden lo mismo que los que tienen.
+       Lo que no cabe se recorta (estilo iOS). */
+    height: 56px;
+    min-width: 0;
+    overflow: hidden;
     box-shadow: var(--shadow-sm);
     position: relative;
     cursor: pointer;
@@ -1120,13 +1150,21 @@ body {
     border: 1px solid var(--primary-green-light);
 }
 
-.month-day-cell.today {
-    background: rgba(59, 130, 246, 0.08);
-    border: 1px solid var(--secondary-blue-light);
+/* Hoy: número dentro de un círculo verde (como el círculo rojo de iOS) */
+.month-day-cell.today .month-day-number {
+    background: var(--primary-green);
+    color: white;
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
 }
 
 .month-day-cell.selected-day {
-    border: 2px solid var(--secondary-blue-light);
+    border: 2px solid var(--primary-green);
     box-shadow: var(--shadow-md);
 }
 
@@ -1149,6 +1187,73 @@ body {
     border-radius: 999px;
     padding: 2px 6px;
     display: inline-block;
+}
+
+/* --- Niveles de zoom del mes (pellizco): altura FIJA por nivel ---
+   Todas las celdas del nivel miden igual, tengan clases o no (estilo iOS) */
+.month-scroll-container.zoom-1 .month-day-cell {
+    height: 86px;
+}
+
+.month-scroll-container.zoom-2 .month-day-cell {
+    /* Zoom máximo: días grandes tipo iOS (~2 semanas visibles por pantalla) */
+    height: 180px;
+}
+
+/* En el zoom máximo el calendario aprovecha más pantalla */
+.month-scroll-container.zoom-2 {
+    max-height: 62vh;
+    max-height: 62dvh;
+}
+
+/* Chips de clase dentro de la celda del mes (estilo iOS).
+   Siempre en una línea con ellipsis: nunca ensanchan la columna. */
+.month-event-chip {
+    display: block;
+    max-width: 100%;
+    margin-top: 3px;
+    padding: 2px 4px;
+    border-radius: 5px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: white;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.month-scroll-container.zoom-2 .month-event-chip {
+    font-size: 0.72rem;
+    padding: 3px 5px;
+    border-radius: 6px;
+}
+
+.month-event-chip .chip-name {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.month-event-chip .chip-time {
+    display: block;
+    font-weight: 700;
+    opacity: 0.95;
+}
+
+.chip-full { background: var(--status-full); }
+.chip-partial { background: var(--status-partial); }
+.chip-empty {
+    background: var(--gray-200);
+    color: var(--gray-700);
+}
+
+.month-more-chip {
+    margin-top: 2px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: var(--gray-500);
 }
 
 .day-classes-panel {
@@ -1376,6 +1481,8 @@ body {
     max-height: calc(100dvh - 220px);
     overflow-y: auto;
     overflow-x: hidden;
+    /* un dedo = scroll; dos dedos = pellizco (volver al mes) */
+    touch-action: pan-y;
 }
 
 .day-view-time-column .time-slot {
@@ -2058,7 +2165,7 @@ form {
     }
 
     .month-day-cell {
-        min-height: 56px;
+        height: 56px;
     }
 
     .month-day-badge {
@@ -2343,9 +2450,10 @@ form {
 .monitor-view-header {
     display: flex;
     align-items: center;
-    gap: var(--spacing-lg);
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
     background: white;
-    padding: var(--spacing-md) var(--spacing-lg);
+    padding: var(--spacing-sm) var(--spacing-md);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
     margin-bottom: var(--spacing-lg);
@@ -2361,6 +2469,8 @@ form {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
     margin-bottom: var(--spacing-xl);
     background: white;
     padding: var(--spacing-lg);
@@ -2371,6 +2481,23 @@ form {
 .dashboard-header h2 {
     font-size: var(--font-size-2xl);
     color: var(--gray-900);
+    letter-spacing: -0.3px;
+    /* Garantizar que el título siempre sea seleccionable con doble clic */
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.dashboard-subtitle {
+    font-size: var(--font-size-sm);
+    color: var(--gray-500);
+    margin-top: 2px;
+}
+
+.dashboard-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
 }
 
 .week-nav-coordinator {
@@ -2722,7 +2849,20 @@ form {
 
     .dashboard-header {
         flex-direction: column;
+        align-items: stretch;
         gap: var(--spacing-md);
+    }
+
+    /* Acciones lado a lado (no apiladas a lo ancho) también en móvil */
+    .dashboard-header-actions {
+        width: 100%;
+        flex-wrap: nowrap;
+    }
+
+    .dashboard-header-actions .btn {
+        flex: 1 1 0;
+        justify-content: center;
+        white-space: nowrap;
     }
 }
 

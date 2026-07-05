@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agridulce Padel Club</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=32">
+    <link rel="stylesheet" href="styles.css?v=39">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -67,9 +67,12 @@
         <!-- Coordinator Dashboard -->
         <section class="coordinator-dashboard" id="coordinatorDashboard" style="display: none;">
             <div class="dashboard-header">
-                <h2>👔 Panel de Coordinador</h2>
+                <div class="dashboard-title-group">
+                    <h2>Panel de Coordinador</h2>
+                    <p class="dashboard-subtitle" id="monitorsCountLabel">Gestión de monitores y clases</p>
+                </div>
                 <div class="dashboard-header-actions">
-                    <button class="btn btn-success" onclick="exportToExcel()" title="Exportar datos a Excel">
+                    <button class="btn btn-ghost" onclick="exportToExcel()" title="Exportar datos a Excel">
                         <span class="btn-icon">📊</span>
                         Exportar Excel
                     </button>
@@ -146,7 +149,7 @@
                                 <option value="bizum">Bizum</option>
                                 <option value="transferencia">Transferencia</option>
                             </select>
-                            <button class="btn btn-success btn-sm" onclick="exportCajaToExcel()">📊 Exportar a Excel</button>
+                            <button class="btn btn-ghost btn-sm" onclick="exportCajaToExcel()">📊 Exportar a Excel</button>
                         </div>
                     </div>
                     <div id="cajaSummary" class="caja-summary"></div>
@@ -245,7 +248,10 @@
         <!-- Calendar Section (Monitor View) -->
         <div id="calendarSectionContainer" style="flex: 1;">
             <div id="monitorViewHeader" style="display:none;" class="monitor-view-header">
-                <button class="btn btn-secondary" onclick="backToCoordinatorDashboard()">← Volver al panel de coordinador</button>
+                <button class="day-back-btn" onclick="backToCoordinatorDashboard()" type="button" title="Volver al panel de coordinador" aria-label="Volver al panel de coordinador">
+                    <span class="day-back-chevron">‹</span>
+                    Panel
+                </button>
                 <span id="monitorViewTitle" class="monitor-view-title"></span>
             </div>
             <section class="calendar-section">
@@ -900,7 +906,7 @@
     <!-- 3. Then load database layer -->
     <script src="db.js?v=24"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=32"></script>
+    <script src="app.js?v=41"></script>
     <!-- 5. Torneos (depende de app.js y db.js) -->
     <script src="tournaments.js?v=24"></script>
 </body>
