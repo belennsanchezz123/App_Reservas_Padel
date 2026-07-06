@@ -1060,15 +1060,55 @@ body {
 .month-calendar-wrapper {
     display: none;
     margin-bottom: var(--spacing-lg);
+    /* Sin selección de texto ni globo de iOS al mantener pulsado: los días
+       y chips del calendario no son texto seleccionable */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+.day-view-grid,
+.day-classes-header,
+.day-title-row {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
 }
 
 /* --- Scroll continuo de meses (estilo calendario de iOS/iCloud) --- */
+/* Barra SUPERIOR fija del mes (estilo calendario de iOS):
+   [ Hoy ]                              [ 👥 ] [ 🏠 ]
+   Dentro del wrapper: desaparece con él en la vista de día. */
 .month-scroll-toolbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 450;
     display: flex;
-    justify-content: flex-end;
-    margin-bottom: var(--spacing-sm);
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    /* Respetar el notch/isla dinámica si la app se abre a pantalla completa */
+    padding-top: calc(8px + env(safe-area-inset-top));
+    background: var(--gray-100);
 }
 
+.month-scroll-toolbar .btn {
+    box-shadow: var(--shadow-md);
+    border-radius: 999px;
+    min-height: 44px;
+    padding: var(--spacing-sm) var(--spacing-lg);
+}
+
+.month-top-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Fila L-M-X-J-V-S-D enganchada justo debajo de la barra superior */
 .month-scroll-weekdays {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -1076,6 +1116,10 @@ body {
     padding: 4px 0 6px;
     border-bottom: 1px solid var(--gray-200);
     margin-bottom: var(--spacing-xs);
+    position: sticky;
+    top: 60px;
+    z-index: 6;
+    background: var(--gray-100);
 }
 
 .month-scroll-weekdays span {
@@ -1088,27 +1132,27 @@ body {
 
 .month-scroll-container {
     position: relative;
-    max-height: 48vh;
-    max-height: 48dvh;
-    overflow-y: auto;
-    /* nunca scroll horizontal: las columnas no pueden crecer */
+    /* SIN scroll interno: los meses fluyen con el scroll de la página
+       (una sola superficie de scroll, como el calendario de iOS) */
     overflow-x: hidden;
-    -webkit-overflow-scrolling: touch;
-    /* que el scroll de meses no arrastre consigo el scroll de la página */
-    overscroll-behavior: contain;
-    /* un dedo = scroll vertical; dos dedos = pellizco gestionado por JS */
+    /* un dedo = scroll vertical de la página; dos dedos = pellizco (JS) */
     touch-action: pan-y;
 }
 
 .month-section {
-    /* padding (no margin) para que la compensación de scroll al cargar
-       meses hacia arriba coincida con offsetHeight */
+    /* Virtualizado: cada mes vive en una posición absoluta del lienzo.
+       Materializar o quitar meses no desplaza a los demás (el padding
+       cuenta dentro de la altura medida). */
+    position: absolute;
+    left: 0;
+    right: 0;
     padding-bottom: var(--spacing-md);
 }
 
 .month-section-title {
     position: sticky;
-    top: 0;
+    /* Debajo de la barra superior (60px) + fila de días de la semana (28px) */
+    top: 88px;
     z-index: 2;
     background: var(--gray-100);
     font-weight: 700;
@@ -1196,14 +1240,17 @@ body {
 }
 
 .month-scroll-container.zoom-2 .month-day-cell {
-    /* Zoom máximo: días grandes tipo iOS (~2 semanas visibles por pantalla) */
-    height: 180px;
+    /* Zoom máximo: ~2 semanas por pantalla. La altura la fija el JS en px
+       al construir el lienzo (--zoom2-cell): dvh en vivo bailaba con la
+       barra de Safari y descuadraba las posiciones cacheadas */
+    height: 300px;
+    height: var(--zoom2-cell, 300px);
 }
 
-/* En el zoom máximo el calendario aprovecha más pantalla */
-.month-scroll-container.zoom-2 {
-    max-height: 62vh;
-    max-height: 62dvh;
+/* Números de día más presentes con tanto espacio */
+.month-scroll-container.zoom-2 .month-day-number {
+    font-size: 1.05rem;
+    font-weight: 700;
 }
 
 /* Chips de clase dentro de la celda del mes (estilo iOS).
@@ -1223,10 +1270,28 @@ body {
     text-overflow: ellipsis;
 }
 
+/* En el zoom de 2 semanas cada columna mide ~50px: ceder el padding al texto
+   para que el nombre quepa envuelto ("Aida" / "Blanco", como iOS) */
+.month-scroll-container.zoom-2 .month-day-cell {
+    padding-left: 3px;
+    padding-right: 3px;
+}
+
 .month-scroll-container.zoom-2 .month-event-chip {
-    font-size: 0.72rem;
-    padding: 3px 5px;
+    font-size: 0.7rem;
+    line-height: 1.15;
+    padding: 3px;
     border-radius: 6px;
+    white-space: normal;
+}
+
+.month-scroll-container.zoom-2 .month-event-chip .chip-name {
+    white-space: normal;
+    overflow-wrap: break-word;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 .month-event-chip .chip-name {
@@ -1268,6 +1333,34 @@ body {
     font-size: var(--font-size-lg);
     margin-bottom: var(--spacing-md);
     color: var(--gray-900);
+}
+
+/* Fila del título del día con navegación ‹ día › */
+.day-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.day-title-row .day-classes-title {
+    margin-bottom: 0;
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.day-nav-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--primary-green-dark);
+    flex-shrink: 0;
 }
 
 /* Barra superior de la vista de día (estilo iOS):
@@ -1323,6 +1416,55 @@ body {
 
 .day-icon-btn:active {
     background: var(--gray-100);
+}
+
+/* --- Sheet "Alumnos": cabecera y buscador fijos, lista con scroll propio
+   que ocupa el resto — el final de la lista siempre es alcanzable --- */
+.students-sheet {
+    display: flex;
+    flex-direction: column;
+    /* el scroll vive en la lista, no en el sheet completo */
+    overflow: hidden;
+}
+
+.students-sheet .modal-header {
+    flex-shrink: 0;
+}
+
+.students-sheet-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    border-bottom: 1px solid var(--gray-100);
+    flex-shrink: 0;
+}
+
+.students-sheet-toolbar input {
+    flex: 1;
+    min-width: 0;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-base);
+    outline: none;
+}
+
+.students-sheet-toolbar input:focus {
+    border-color: var(--primary-green);
+}
+
+.students-sheet-toolbar .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.students-modal-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--spacing-md);
+    padding-bottom: calc(var(--spacing-md) + env(safe-area-inset-bottom));
 }
 
 /* --- Búsqueda de clases por alumno (modal del botón 🔍) --- */
@@ -1548,6 +1690,43 @@ body {
         transform: translateY(0);
         opacity: 1;
     }
+}
+
+/* Entrada de los sheets móviles: suben desde el borde inferior */
+@keyframes sheetUp {
+    from {
+        transform: translateY(100%);
+    }
+
+    to {
+        transform: translateY(0);
+    }
+}
+
+/* ==========================================
+   TRANSICIÓN MES ↔ DÍA (View Transitions API)
+   La celda seleccionada y la vista de día comparten identidad: al entrar,
+   la celda "crece" hasta ser la vista de día; al volver, se "encoge".
+   En navegadores sin soporte no pasa nada (cambio instantáneo como antes).
+   ========================================== */
+@media (max-width: 768px), ((hover: none) and (pointer: coarse) and (max-width: 950px)) {
+    .month-day-cell.selected-day {
+        view-transition-name: day-zoom;
+    }
+
+    .day-classes-panel.visible {
+        view-transition-name: day-zoom;
+    }
+}
+
+::view-transition-group(day-zoom) {
+    animation-duration: 0.3s;
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+    animation-duration: 0.25s;
 }
 
 .modal-header {
@@ -2023,7 +2202,7 @@ form {
     }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 768px), ((hover: none) and (pointer: coarse) and (max-width: 950px)) {
     .header {
         padding: var(--spacing-md);
         /* En móvil el header no va fijo: se desplaza con la página para no
@@ -2035,6 +2214,16 @@ form {
        el "+" del panel del día (aparece al tocar un día del calendario) */
     #addClassBtn {
         display: none !important;
+    }
+
+    /* "Ver Alumnos" vive en la barra flotante del mes (👥); el botón de
+       arriba queda fuera del alcance con la lista de meses virtualizada */
+    #toggleSidebarBtn {
+        display: none !important;
+    }
+
+    .quick-actions {
+        margin-bottom: 0;
     }
 
     .header-content {
@@ -2184,14 +2373,33 @@ form {
         background: var(--gray-100);
     }
 
-    /* Modales: aprovechar la altura real del viewport y evitar que la fila
-       de botones (p.ej. Cerrar/Eliminar/Editar) desborde en pantallas estrechas */
+    /* Modales como SHEETS estilo iOS: anclados abajo, suben deslizándose
+       y se cierran arrastrando hacia abajo (JS: setupSheetDragDismiss) */
     .modal {
-        padding: var(--spacing-sm);
+        padding: 0;
+        align-items: flex-end;
     }
 
     .modal-content {
-        max-height: calc(100dvh - 1rem);
+        max-width: 100%;
+        width: 100%;
+        max-height: calc(100dvh - 2.5rem);
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        animation: sheetUp 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+        padding-bottom: env(safe-area-inset-bottom);
+        will-change: transform;
+    }
+
+    /* Asa de arrastre (la barrita gris de los sheets de iOS) */
+    .modal-content::before {
+        content: '';
+        display: block;
+        width: 40px;
+        height: 4px;
+        border-radius: 999px;
+        background: var(--gray-300);
+        margin: 8px auto 0;
+        flex-shrink: 0;
     }
 
     .modal-actions {
@@ -2206,6 +2414,12 @@ form {
     /* El dropdown de alumnos nunca más ancho que la pantalla */
     .students-dropdown {
         width: min(340px, calc(100vw - 2rem));
+    }
+
+    /* El sheet de Alumnos ocupa (casi) toda la pantalla: la lista recibe
+       todo el alto restante y su final siempre es visible */
+    .students-sheet {
+        height: calc(100dvh - 2.5rem);
     }
 
     /* Header más compacto */
@@ -2536,6 +2750,8 @@ form {
     overflow: hidden;
     transition: all var(--transition-normal);
     border: 2px solid transparent;
+    /* La tarjeta entera abre el calendario del monitor */
+    cursor: pointer;
 }
 
 .monitor-card:hover {
@@ -2545,19 +2761,44 @@ form {
 }
 
 .monitor-card-header {
-    background: var(--ink-800);
-    border-bottom: 2px solid var(--primary-green);
+    background: white;
+    border-bottom: 1px solid var(--gray-100);
     padding: var(--spacing-md) var(--spacing-lg);
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.monitor-card-id {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    min-width: 0;
+}
+
+.monitor-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary-green), var(--primary-green-dark));
+    color: white;
+    font-weight: 700;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .monitor-card-header h3 {
-    color: white;
+    color: var(--gray-900);
     font-size: var(--font-size-lg);
     font-weight: 600;
     margin: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
 .monitor-card-actions {
@@ -2566,7 +2807,7 @@ form {
 }
 
 .btn-icon-sm {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--gray-100);
     border: none;
     padding: var(--spacing-xs) var(--spacing-sm);
     border-radius: var(--radius-sm);
@@ -2576,16 +2817,16 @@ form {
 }
 
 .btn-icon-sm:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: var(--gray-200);
     transform: scale(1.1);
 }
 
 .btn-danger-sm {
-    background: rgba(239, 68, 68, 0.3);
+    background: #fee2e2;
 }
 
 .btn-danger-sm:hover {
-    background: rgba(239, 68, 68, 0.5);
+    background: #fecaca;
 }
 
 .monitor-card-info {
@@ -2599,11 +2840,17 @@ form {
     font-size: var(--font-size-sm);
 }
 
+/* Datos ausentes atenuados: el ojo se los salta */
+.monitor-info-empty {
+    color: var(--gray-400) !important;
+}
+
 .monitor-card-stats {
-    padding: var(--spacing-lg);
+    padding: var(--spacing-md) var(--spacing-lg);
     display: flex;
     gap: var(--spacing-lg);
     background: var(--gray-50);
+    border-top: 1px solid var(--gray-100);
 }
 
 .stat-item {
@@ -2613,7 +2860,7 @@ form {
 
 .stat-value {
     display: block;
-    font-size: var(--font-size-3xl);
+    font-size: var(--font-size-2xl);
     font-weight: 700;
     color: var(--primary-green);
     margin-bottom: var(--spacing-xs);
@@ -2645,6 +2892,15 @@ form {
 
 .monitor-details-toggle:hover {
     background: var(--gray-200);
+}
+
+.details-arrow {
+    display: inline-block;
+    transition: transform var(--transition-fast);
+}
+
+.monitor-details-toggle.open .details-arrow {
+    transform: rotate(180deg);
 }
 
 .monitor-details-panel {
@@ -2738,6 +2994,12 @@ form {
     background: var(--gray-100);
 }
 
+/* Mes en curso resaltado para localizarlo de un vistazo */
+.monitor-month-table .month-row-current td {
+    background: #ecfdf5;
+    font-weight: 600;
+}
+
 .month-expand-icon {
     font-size: 0.7rem;
     color: var(--gray-400);
@@ -2810,7 +3072,7 @@ form {
 /* ==========================================
    RESPONSIVE - MULTI-USER
    ========================================== */
-@media (max-width: 768px) {
+@media (max-width: 768px), ((hover: none) and (pointer: coarse) and (max-width: 950px)) {
     .login-screen {
         justify-content: flex-start;
         align-items: flex-start;
@@ -2882,7 +3144,7 @@ form {
 }
 
 /* Responsive styles for mobile devices */
-@media (max-width: 768px) {
+@media (max-width: 768px), ((hover: none) and (pointer: coarse) and (max-width: 950px)) {
     body {
         font-size: 14px;
     }
@@ -3368,7 +3630,7 @@ form {
 }
 
 /* En móvil las 5 pestañas no caben: carrusel horizontal con scroll */
-@media (max-width: 768px) {
+@media (max-width: 768px), ((hover: none) and (pointer: coarse) and (max-width: 950px)) {
     .recepcion-tabs {
         width: 100%;
         max-width: 100%;

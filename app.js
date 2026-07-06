@@ -233,6 +233,25 @@ function isTouchDevice() {
     return ('ontouchstart' in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
 }
 
+// "Móvil" = dispositivo táctil sin ratón (aunque esté girado en apaisado y
+// supere los 768px), o cualquier pantalla estrecha. Evita que un iPhone en
+// horizontal caiga por accidente en la vista semanal de escritorio.
+// Debe coincidir con la condición de los @media en styles.css.
+function isMobileLayout() {
+    const coarseTouch = window.matchMedia('(hover: none) and (pointer: coarse) and (max-width: 950px)').matches;
+    return coarseTouch || window.innerWidth <= 768;
+}
+
+// Transición animada entre vistas (View Transitions API).
+// En navegadores sin soporte (o en escritorio) ejecuta el cambio tal cual.
+function withViewTransition(update) {
+    if (document.startViewTransition && isMobileLayout()) {
+        document.startViewTransition(update);
+    } else {
+        update();
+    }
+}
+
 function timeStringToMinutes(timeStr) {
     if (!timeStr) return 0;
     const [h, m] = String(timeStr).split(':').map(n => parseInt(n, 10) || 0);
@@ -782,15 +801,11 @@ function renderCalendar() {
     const grid = document.getElementById('calendarGrid');
     const monthWrapper = document.getElementById('monthCalendarWrapper');
 
-    if (!appState.currentWeekStart) {
-        appState.currentWeekStart = getMonday(new Date());
+    if (!appState.currentWeekStart || !appState.currentMonthDate) {
+        setAnchorDate(getAnchorDate());
     }
 
-    if (!appState.currentMonthDate) {
-        appState.currentMonthDate = new Date();
-    }
-
-    const isMobile = window.innerWidth <= 768;
+    const isMobile = isMobileLayout();
 
     if (isMobile && monthWrapper) {
         renderMonthCalendar();
@@ -835,9 +850,44 @@ function getClassesForDate(targetDate) {
 // Se baja con el dedo y van apareciendo los meses siguientes/anteriores.
 // Estado de UI local (rango de meses renderizados); no duplica datos de appState.
 // ==========================================
-let monthScrollRange = null;    // { start: Date, end: Date } — día 1 de cada mes
-let monthScrollLoading = false; // evita cargas dobles durante el scroll
-let dayPanelOpen = false;       // el panel del día solo se muestra tras tocar un día
+// ==========================================
+// NAVEGACIÓN MÓVIL — dos ejes independientes
+//  · Eje jerárquico: mobileViewLevel ('month' | 'day')
+//  · Eje temporal:   appState.selectedDayDate es la ÚNICA fecha ancla;
+//    currentWeekStart y currentMonthDate se derivan de ella vía setAnchorDate.
+//    (currentMonthDate refleja además el mes visible durante el scroll.)
+// ==========================================
+let mobileViewLevel = 'month';
+
+function setAnchorDate(date) {
+    const d = new Date(date);
+    appState.selectedDayDate = d.toISOString();
+    appState.currentWeekStart = getMonday(d);
+    appState.currentMonthDate = new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function getAnchorDate() {
+    return appState.selectedDayDate ? new Date(appState.selectedDayDate) : new Date();
+}
+
+// Entrar en la vista de día con una fecha (tap en celda del mes, swipe…)
+function openDayView(date) {
+    setAnchorDate(date);
+    mobileViewLevel = 'day';
+    // Transición animada: la celda del día "crece" hasta la vista de día.
+    // La página vuelve arriba para mostrar la vista de día completa.
+    withViewTransition(() => {
+        renderMonthCalendar();
+        window.scrollTo(0, 0);
+    });
+}
+
+// Cambiar de día sin salir de la vista de día (swipe horizontal o botones ‹ ›)
+function navigateDay(delta) {
+    const d = getAnchorDate();
+    d.setDate(d.getDate() + delta);
+    openDayView(d);
+}
 
 // Nivel de zoom del mes (pellizco, estilo iOS):
 // 0 = compacto (contador de clases) · 1 = chips con nombre · 2 = chips con nombre y hora
@@ -846,22 +896,44 @@ try {
     monthZoomLevel = Math.max(0, Math.min(2, parseInt(localStorage.getItem('padel_monthZoomLevel'), 10) || 0));
 } catch (e) { /* localStorage no disponible */ }
 
-function setMonthZoom(level) {
+// El pellizco solo ENCOLA el cambio de nivel; el re-render se hace al soltar
+// los dedos (onGestureEnd). Reconstruir el DOM en mitad del gesto hace que
+// iOS pierda el touchend (el elemento tocado desaparece) y el contenedor
+// quedaba con el scroll bloqueado para siempre.
+let pendingMonthZoom = null;
+
+function queueMonthZoom(level) {
     const clamped = Math.max(0, Math.min(2, level));
-    if (clamped === monthZoomLevel) return;
-    monthZoomLevel = clamped;
-    try { localStorage.setItem('padel_monthZoomLevel', String(clamped)); } catch (e) { /* noop */ }
+    if (clamped === monthZoomLevel || clamped === pendingMonthZoom) return;
+    pendingMonthZoom = clamped;
     if (window.navigator.vibrate) window.navigator.vibrate(20);
+}
+
+function applyPendingMonthZoom() {
+    if (pendingMonthZoom === null) return;
+    monthZoomLevel = pendingMonthZoom;
+    pendingMonthZoom = null;
+    try { localStorage.setItem('padel_monthZoomLevel', String(monthZoomLevel)); } catch (e) { /* noop */ }
+    monthZoomDirty = true; // las alturas de celda cambian: rehacer el lienzo
     renderMonthCalendar();
 }
 
 // Cerrar la vista de día y volver al calendario mensual (botón "‹ Mes" y pellizco)
 function closeDayViewToMonth() {
-    dayPanelOpen = false;
-    const panel = document.getElementById('dayClassesPanel');
-    if (panel) panel.classList.remove('visible');
-    const monthWrapper = document.getElementById('monthCalendarWrapper');
-    if (monthWrapper) monthWrapper.style.display = '';
+    // Transición animada: la vista de día "se encoge" de vuelta a su celda
+    withViewTransition(() => {
+        mobileViewLevel = 'month';
+        const panel = document.getElementById('dayClassesPanel');
+        if (panel) panel.classList.remove('visible');
+        const monthWrapper = document.getElementById('monthCalendarWrapper');
+        if (monthWrapper) monthWrapper.style.display = '';
+        // Refrescar las secciones (los datos pudieron cambiar en la vista de
+        // día) y recolocar la página con el mes del día que estabas viendo
+        const cont = document.getElementById('monthScrollContainer');
+        if (cont) cont.querySelectorAll('.month-section').forEach(s => s.remove());
+        scrollToMonthSection(getAnchorDate(), false);
+        updateVirtualMonths();
+    });
 }
 
 // Gesto de pellizco con dos dedos (estilo calendario de iOS):
@@ -872,6 +944,16 @@ function setupPinchGesture(el, handlers) {
     let fired = false;
     let centerX = 0;
     let centerY = 0;
+
+    // lockPage: el scroll a congelar durante el pellizco es el de la PÁGINA
+    // (la lista de meses usa el scroll de la ventana, como iOS)
+    const lockPage = !!handlers.lockPage;
+    const scrollTarget = lockPage ? window : el;
+    const getScrollPos = () => (lockPage ? window.scrollY : el.scrollTop);
+    const setScrollPos = (v) => {
+        if (lockPage) window.scrollTo(0, v);
+        else el.scrollTop = v;
+    };
 
     function touchDistance(touches) {
         const dx = touches[0].clientX - touches[1].clientX;
@@ -887,10 +969,24 @@ function setupPinchGesture(el, handlers) {
     // se cambie overflow o se llame a preventDefault. Mientras el pellizco esté
     // activo, cualquier scroll que se cuele se revierte inmediatamente.
     const lockScroll = () => {
-        if (el.scrollTop !== lockTop) el.scrollTop = lockTop;
+        if (getScrollPos() !== lockTop) setScrollPos(lockTop);
     };
 
     el.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+            // Un dedo tras un pellizco: liberar el candado residual al instante,
+            // el usuario quiere scrollear y no hay que pisarle el gesto
+            clearTimeout(unlockTimer);
+            scrollTarget.removeEventListener('scroll', lockScroll);
+            // Recuperación: si un pellizco anterior quedó a medias (iOS perdió
+            // su touchend), restaurar el scroll ahora
+            if (active || el.dataset.pinching === '1') {
+                if (!lockPage) el.style.overflowY = prevOverflowY || '';
+                delete el.dataset.pinching;
+                active = false;
+                if (handlers.onGestureEnd) handlers.onGestureEnd();
+            }
+        }
         if (e.touches.length === 2) {
             active = true;
             fired = false;
@@ -898,11 +994,13 @@ function setupPinchGesture(el, handlers) {
             centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
             centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
             el.dataset.pinching = '1';
-            prevOverflowY = el.style.overflowY;
-            el.style.overflowY = 'hidden';
+            if (!lockPage) {
+                prevOverflowY = el.style.overflowY;
+                el.style.overflowY = 'hidden';
+            }
             clearTimeout(unlockTimer);
-            lockTop = el.scrollTop;
-            el.addEventListener('scroll', lockScroll);
+            lockTop = getScrollPos();
+            scrollTarget.addEventListener('scroll', lockScroll);
         }
     }, { passive: true });
 
@@ -917,33 +1015,77 @@ function setupPinchGesture(el, handlers) {
         if (ratio > 1.25 && handlers.onZoomIn) {
             fired = true;
             handlers.onZoomIn(centerX, centerY);
-            // El re-render pudo recolocar el scroll (anclado al mes visible):
-            // ese nuevo valor pasa a ser la posición bloqueada
-            lockTop = el.scrollTop;
+            lockTop = getScrollPos();
         } else if (ratio < 0.8 && handlers.onZoomOut) {
             fired = true;
             handlers.onZoomOut(centerX, centerY);
-            lockTop = el.scrollTop;
+            lockTop = getScrollPos();
         }
     }, { passive: false });
 
     const resetPinch = (e) => {
         if (!e.touches || e.touches.length < 2) {
             if (active) {
-                el.style.overflowY = prevOverflowY || '';
+                if (!lockPage) el.style.overflowY = prevOverflowY || '';
                 delete el.dataset.pinching;
                 // Mantener el candado un instante más para absorber la
                 // inercia residual del scroll que iOS pueda soltar al final
                 clearTimeout(unlockTimer);
                 unlockTimer = setTimeout(() => {
-                    el.removeEventListener('scroll', lockScroll);
+                    scrollTarget.removeEventListener('scroll', lockScroll);
                 }, 250);
+                active = false;
+                // El gesto terminó: aplicar ahora los cambios encolados
+                // (re-render seguro, ya no hay dedos sobre el DOM)
+                if (handlers.onGestureEnd) handlers.onGestureEnd();
+                // El re-render pudo recolocar el scroll: la nueva posición
+                // pasa a ser la bloqueada durante la ventana de inercia
+                lockTop = getScrollPos();
             }
             active = false;
         }
     };
     el.addEventListener('touchend', resetPinch);
     el.addEventListener('touchcancel', resetPinch);
+    // Redundancia deliberada: si iOS no entrega el touchend al contenedor
+    // (target original eliminado), el documento sí lo recibe
+    document.addEventListener('touchend', resetPinch);
+    document.addEventListener('touchcancel', resetPinch);
+}
+
+// Swipe horizontal en la vista de día → día anterior / siguiente (estilo iOS)
+function setupDaySwipe(el) {
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+    let tracking = false;
+
+    el.addEventListener('touchstart', (e) => {
+        // Ignorar pellizcos (dos dedos) y gestos que empiezan sobre una clase
+        // (ahí manda el long-press de arrastre)
+        if (e.touches.length !== 1 || e.target.closest('.class-card')) {
+            tracking = false;
+            return;
+        }
+        const t = e.touches[0];
+        startX = t.clientX;
+        startY = t.clientY;
+        startTime = Date.now();
+        tracking = true;
+    }, { passive: true });
+
+    el.addEventListener('touchend', (e) => {
+        if (!tracking) return;
+        tracking = false;
+        const t = e.changedTouches[0];
+        if (!t) return;
+        if (Date.now() - startTime > 600) return;      // demasiado lento: no es swipe
+        const dx = t.clientX - startX;
+        const dy = t.clientY - startY;
+        if (Math.abs(dx) < 60) return;                 // umbral mínimo de recorrido
+        if (Math.abs(dx) < Math.abs(dy) * 1.5) return; // debe dominar el eje horizontal
+        navigateDay(dx < 0 ? 1 : -1);
+    });
 }
 
 function buildMonthSection(year, month) {
@@ -981,8 +1123,11 @@ function buildMonthSection(year, month) {
 
         const cellDate = new Date(year, month, dayNumber);
         const cellDateStr = formatDateISO(cellDate);
+        cell.dataset.day = String(dayNumber);
 
-        const classesForDay = getClassesForDate(cellDate);
+        const classesForDay = monthClassesByDate
+            ? (monthClassesByDate.get(cellDateStr) || [])
+            : getClassesForDate(cellDate);
         const hasClasses = classesForDay.length > 0;
         if (hasClasses) cell.classList.add('has-classes');
         if (cellDateStr === todayStr) cell.classList.add('today');
@@ -1002,7 +1147,7 @@ function buildMonthSection(year, month) {
                 cell.appendChild(badge);
             } else {
                 // Niveles ampliados: chips estilo iOS con el alumno (y hora en nivel 2)
-                const maxChips = monthZoomLevel === 1 ? 2 : 4;
+                const maxChips = monthZoomLevel === 1 ? 2 : 5;
                 classesForDay.slice(0, maxChips).forEach(cls => {
                     const chip = document.createElement('div');
                     chip.className = `month-event-chip chip-${getClassOccupancy(cls)}`;
@@ -1037,19 +1182,7 @@ function buildMonthSection(year, month) {
             }
         }
 
-        cell.addEventListener('click', () => {
-            appState.selectedDayDate = cellDate.toISOString();
-            appState.currentMonthDate = new Date(year, month, 1);
-            dayPanelOpen = true;
-            renderDayClassesPanel(cellDate);
-            // Actualizar el resaltado sin reconstruir la lista (conserva el scroll)
-            const container = document.getElementById('monthScrollContainer');
-            if (container) {
-                const prev = container.querySelector('.month-day-cell.selected-day');
-                if (prev) prev.classList.remove('selected-day');
-            }
-            cell.classList.add('selected-day');
-        });
+        cell.addEventListener('click', () => openDayView(cellDate));
 
         grid.appendChild(cell);
     }
@@ -1058,68 +1191,256 @@ function buildMonthSection(year, month) {
     return section;
 }
 
-// Velocidad del scroll para no cargar meses en pleno impulso (momentum)
-let monthScrollLastTop = 0;
-let monthScrollLastTime = 0;
-let monthScrollLastLoad = 0;
+// ==========================================
+// VIRTUALIZACIÓN DEL CALENDARIO MENSUAL (estilo UICollectionView de iOS)
+// Cada mes se pinta en una posición ABSOLUTA calculada dentro de un lienzo
+// alto. Materializar o quitar un mes no desplaza a los demás, así que jamás
+// hay que ajustar el scroll: sin saltos y sin matar la inercia, en cualquier
+// navegador. Las alturas son deterministas (celdas de altura fija por nivel
+// de zoom), medidas una vez por número de filas.
+// ==========================================
+const MONTH_VIEW_BUFFER = 1600;   // px materializados por delante y por detrás
+
+// Índice fecha → clases (con filtro de rol aplicado). Construir un mes deja
+// de escanear TODAS las clases por cada celda: mirar el mapa es O(1).
+// Se reconstruye en cada render por datos (renderMonthCalendar).
+let monthClassesByDate = null;
+
+function rebuildMonthClassesIndex() {
+    monthClassesByDate = new Map();
+    let classes = appState.classes;
+    if (isMonitor()) {
+        const cu = getCurrentUser();
+        classes = classes.filter(c => c.monitorId === cu.id);
+    } else if (isCoordinator() && appState.viewingMonitorId) {
+        classes = classes.filter(c => c.monitorId === appState.viewingMonitorId);
+    }
+    classes.forEach(c => {
+        if (!c || !c.date) return;
+        const key = formatDateISO(c.date);
+        if (!monthClassesByDate.has(key)) monthClassesByDate.set(key, []);
+        monthClassesByDate.get(key).push(c);
+    });
+    monthClassesByDate.forEach(list =>
+        list.sort((a, b) => timeStringToMinutes(a.startTime) - timeStringToMinutes(b.startTime))
+    );
+}
+
+let monthLayout = new Map();      // idx (año*12+mes) -> { top, height }
+let monthLayoutMin = 0;           // rango contiguo cacheado
+let monthLayoutMax = 0;
+let monthHeightByRows = {};       // nº de filas (4/5/6) -> altura en px
+let monthZoomDirty = false;       // las alturas cambiaron (zoom o rotación)
+
+function monthIndex(y, m) { return y * 12 + m; }
+function ymOf(idx) { return { y: Math.floor(idx / 12), m: ((idx % 12) + 12) % 12 }; }
+
+function rowsInMonth(y, m) {
+    const startDay = (new Date(y, m, 1).getDay() + 6) % 7;
+    const days = new Date(y, m + 1, 0).getDate();
+    return Math.ceil((startDay + days) / 7);
+}
+
+// Altura de un mes según sus filas, medida con una sección sonda (una vez
+// por combinación filas×zoom; el contenido no altera la altura: es fija)
+function getMonthHeight(y, m) {
+    const rows = rowsInMonth(y, m);
+    if (monthHeightByRows[rows]) return monthHeightByRows[rows];
+    const container = document.getElementById('monthScrollContainer');
+    if (!container) return 400;
+    const probe = buildMonthSection(y, m);
+    probe.style.visibility = 'hidden';
+    probe.style.top = '0px';
+    container.appendChild(probe);
+    const h = probe.offsetHeight || 400;
+    probe.remove();
+    monthHeightByRows[rows] = h;
+    return h;
+}
+
+function initMonthLayout(anchorIdx) {
+    monthLayout = new Map();
+    monthHeightByRows = {};
+    const { y, m } = ymOf(anchorIdx);
+    const h = getMonthHeight(y, m);
+    // Pista inicial: 3 AÑOS de hueco por encima del ancla. Ni una cadena de
+    // flings con inercia puede agotarla antes de que una pausa la reponga.
+    let topAllowance = 0;
+    for (let i = 1; i <= 36; i++) {
+        const a = ymOf(anchorIdx - i);
+        topAllowance += getMonthHeight(a.y, a.m);
+    }
+    monthLayout.set(anchorIdx, { top: topAllowance, height: h });
+    monthLayoutMin = anchorIdx;
+    monthLayoutMax = anchorIdx;
+}
+
+function extendLayoutUp() {
+    const prev = monthLayout.get(monthLayoutMax);
+    const nextIdx = monthLayoutMax + 1;
+    const { y, m } = ymOf(nextIdx);
+    monthLayout.set(nextIdx, { top: prev.top + prev.height, height: getMonthHeight(y, m) });
+    monthLayoutMax = nextIdx;
+}
+
+function extendLayoutDown() {
+    const prevIdx = monthLayoutMin - 1;
+    const { y, m } = ymOf(prevIdx);
+    const h = getMonthHeight(y, m);
+    const below = monthLayout.get(monthLayoutMin);
+    if (below.top - h < 0) return false; // sin hueco arriba: hará falta rebase
+    monthLayout.set(prevIdx, { top: below.top - h, height: h });
+    monthLayoutMin = prevIdx;
+    return true;
+}
+
+// Rebase: ganar N meses de hueco por arriba desplazando TODO (layout,
+// secciones, lienzo y scroll) la misma cantidad. Visualmente invisible;
+// solo se hace con el scroll en calma para no matar la inercia.
+function rebaseCanvas(extraMonths) {
+    const container = document.getElementById('monthScrollContainer');
+    if (!container || monthLayout.size === 0) return;
+    let K = 0;
+    for (let i = 1; i <= extraMonths; i++) {
+        const { y, m } = ymOf(monthLayoutMin - i);
+        K += getMonthHeight(y, m);
+    }
+    monthLayout.forEach(l => { l.top += K; });
+    container.querySelectorAll('.month-section').forEach(sec => {
+        sec.style.top = `${parseFloat(sec.style.top) + K}px`;
+    });
+    container.style.height = `${(parseFloat(container.style.height) || 0) + K}px`;
+    window.scrollTo(0, window.scrollY + K);
+}
+
+function ensureLayoutFor(idx) {
+    while (idx > monthLayoutMax) extendLayoutUp();
+    while (idx < monthLayoutMin) {
+        if (!extendLayoutDown()) rebaseCanvas(12);
+    }
+    return monthLayout.get(idx);
+}
+
+function materializeMonth(idx, container) {
+    if (container.querySelector(`.month-section[data-idx="${idx}"]`)) return;
+    const { y, m } = ymOf(idx);
+    const lay = monthLayout.get(idx);
+    const sec = buildMonthSection(y, m);
+    sec.dataset.idx = String(idx);
+    sec.style.top = `${lay.top}px`;
+    container.appendChild(sec);
+}
+
+// Núcleo de la virtualización: materializa los meses de la ventana visible
+// (± buffer) y quita los que quedaron lejos. Nunca toca el scroll.
+function updateVirtualMonths() {
+    const wrapper = document.getElementById('monthCalendarWrapper');
+    const container = document.getElementById('monthScrollContainer');
+    if (!wrapper || !container || wrapper.style.display === 'none') return;
+    if (monthLayout.size === 0) return;
+
+    const viewTop = -container.getBoundingClientRect().top;
+    const from = Math.max(viewTop - MONTH_VIEW_BUFFER, 0);
+    const to = viewTop + window.innerHeight + MONTH_VIEW_BUFFER;
+
+    // Extender el layout cacheado hasta cubrir la ventana
+    while (monthLayout.get(monthLayoutMin).top > from && extendLayoutDown()) { /* seguir */ }
+
+    // Sin hueco arriba y a punto de tocar el tope del lienzo: rebase de
+    // emergencia AHORA (mejor un microajuste que chocar contra el muro).
+    // Con 3 años de pista inicial + reposición en cada pausa, este caso
+    // es prácticamente inalcanzable.
+    if (monthLayout.get(monthLayoutMin).top > from &&
+        viewTop < window.innerHeight * 1.5) {
+        rebaseCanvas(48);
+        updateVirtualMonths();
+        return;
+    }
+
+    while (true) {
+        const maxL = monthLayout.get(monthLayoutMax);
+        if (maxL.top + maxL.height >= to) break;
+        extendLayoutUp();
+    }
+
+    // Materializar la ventana y localizar el mes visible
+    const needed = new Set();
+    let visibleIdx = null;
+    for (let i = monthLayoutMin; i <= monthLayoutMax; i++) {
+        const l = monthLayout.get(i);
+        if (l.top <= viewTop + 90) visibleIdx = i;
+        if (l.top + l.height <= from || l.top >= to) continue;
+        needed.add(i);
+        materializeMonth(i, container);
+    }
+
+    if (visibleIdx !== null) {
+        const { y, m } = ymOf(visibleIdx);
+        appState.currentMonthDate = new Date(y, m, 1);
+    }
+
+    // Desmaterializar con HISTÉRESIS: los meses recién pasados se conservan
+    // un buffer extra, así invertir la dirección del scroll no obliga a
+    // reconstruirlos al instante (evita el tirón al cambiar de sentido)
+    container.querySelectorAll('.month-section').forEach(sec => {
+        const i = parseInt(sec.dataset.idx, 10);
+        if (needed.has(i)) return;
+        const l = monthLayout.get(i);
+        if (!l || l.top + l.height < from - MONTH_VIEW_BUFFER || l.top > to + MONTH_VIEW_BUFFER) {
+            sec.remove();
+        }
+    });
+
+    // El lienzo crece por abajo según se avanza (crecer abajo no mueve nada)
+    const maxL = monthLayout.get(monthLayoutMax);
+    const neededHeight = maxL.top + maxL.height + window.innerHeight;
+    if ((parseFloat(container.style.height) || 0) < neededHeight) {
+        container.style.height = `${neededHeight}px`;
+    }
+}
+
+// (la antigua poda por ventana ya no existe: la virtualización materializa y
+// desmaterializa por posición, sin tocar nunca el scroll)
+
+let monthIdleTimer = null;
 
 function onMonthScroll() {
+    // El scroll de meses ES el scroll de la página (una sola superficie, como iOS)
+    if (!isMobileLayout() || mobileViewLevel !== 'month') return;
     const container = document.getElementById('monthScrollContainer');
-    if (!container || monthScrollLoading || !monthScrollRange) return;
-    // Durante un pellizco no se navega ni se cargan meses
-    if (container.dataset.pinching === '1') return;
+    if (!container || container.dataset.pinching === '1') return;
 
-    // Medir la velocidad del desplazamiento (px/ms)
-    const now = performance.now();
-    const dt = now - monthScrollLastTime;
-    const velocity = dt > 0 ? Math.abs(container.scrollTop - monthScrollLastTop) / dt : 0;
-    monthScrollLastTop = container.scrollTop;
-    monthScrollLastTime = now;
+    updateVirtualMonths();
 
-    // Mes "visible": la última sección cuyo inicio queda por encima del corte
-    const sections = container.querySelectorAll('.month-section');
-    let visible = null;
-    const cutoff = container.scrollTop + 60;
-    sections.forEach(sec => {
-        if (sec.offsetTop <= cutoff) visible = sec;
-    });
-    if (visible) {
-        appState.currentMonthDate = new Date(
-            parseInt(visible.dataset.year, 10),
-            parseInt(visible.dataset.month, 10),
-            1
-        );
-    }
+    // Con el scroll en calma, ampliar el margen superior si escasea
+    // (rebase invisible: jamás durante el gesto, para no matar la inercia)
+    clearTimeout(monthIdleTimer);
+    monthIdleTimer = setTimeout(maybeExtendHeadroom, 180);
+}
 
-    // Cargar meses SOLO con scroll pausado: un lanzamiento fuerte (momentum)
-    // se frena contra el borde de lo cargado en vez de viajar meses sin fin.
-    // 0.5 px/ms ≈ 500 px/s; además, máximo una carga cada 250 ms.
-    if (velocity > 0.5) return;
-    if (now - monthScrollLastLoad < 250) return;
+// El listener vive en la ventana: la lista de meses no tiene scroll propio
+window.addEventListener('scroll', onMonthScroll, { passive: true });
 
-    const nearTop = container.scrollTop < 150;
-    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+function maybeExtendHeadroom() {
+    if (!isMobileLayout() || mobileViewLevel !== 'month') return;
+    const container = document.getElementById('monthScrollContainer');
+    if (!container || container.dataset.pinching === '1' || monthLayout.size === 0) return;
+    const viewTop = -container.getBoundingClientRect().top;
+    if (viewTop > window.innerHeight * 3) return; // aún hay margen de sobra
+    // Con el scroll en calma el rebase es 100% invisible: reponer 3 años de
+    // pista para que el rebase de emergencia en movimiento nunca haga falta
+    rebaseCanvas(36);
+    updateVirtualMonths();
+}
 
-    if (nearTop || nearBottom) monthScrollLastLoad = now;
-
-    if (nearTop) {
-        // Cargar el mes anterior arriba, compensando el scroll para que no salte
-        monthScrollLoading = true;
-        const s = monthScrollRange.start;
-        const prev = new Date(s.getFullYear(), s.getMonth() - 1, 1);
-        monthScrollRange.start = prev;
-        const section = buildMonthSection(prev.getFullYear(), prev.getMonth());
-        container.insertBefore(section, container.firstChild);
-        container.scrollTop += section.offsetHeight;
-        monthScrollLoading = false;
-    } else if (nearBottom) {
-        monthScrollLoading = true;
-        const e = monthScrollRange.end;
-        const next = new Date(e.getFullYear(), e.getMonth() + 1, 1);
-        monthScrollRange.end = next;
-        container.appendChild(buildMonthSection(next.getFullYear(), next.getMonth()));
-        monthScrollLoading = false;
-    }
+// Colocar la página de forma que un mes concreto quede arriba del calendario
+function scrollToMonthSection(date, smooth) {
+    const container = document.getElementById('monthScrollContainer');
+    if (!container || monthLayout.size === 0) return;
+    const lay = ensureLayoutFor(monthIndex(date.getFullYear(), date.getMonth()));
+    const containerTopPage = container.getBoundingClientRect().top + window.scrollY;
+    const top = containerTopPage + lay.top - 90;
+    window.scrollTo({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'auto' });
 }
 
 function renderMonthCalendar() {
@@ -1129,24 +1450,14 @@ function renderMonthCalendar() {
     const baseDate = new Date(appState.currentMonthDate || new Date());
     const baseMonth = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
 
-    // Rango inicial: un mes antes y dos después del mes base. Si el mes base
-    // sale del rango cargado (p.ej. botón "Hoy"), se recentra.
-    const outOfRange = monthScrollRange &&
-        (baseMonth < monthScrollRange.start || baseMonth > monthScrollRange.end);
-    let needsScrollToBase = false;
-    if (!monthScrollRange || outOfRange) {
-        monthScrollRange = {
-            start: new Date(baseMonth.getFullYear(), baseMonth.getMonth() - 1, 1),
-            end: new Date(baseMonth.getFullYear(), baseMonth.getMonth() + 2, 1)
-        };
-        needsScrollToBase = true;
-    }
+    // Índice fecha → clases fresco para este render (lo usan las sondas
+    // de altura y cada materialización posterior durante el scroll)
+    rebuildMonthClassesIndex();
 
     let container = document.getElementById('monthScrollContainer');
     if (!container) {
         // Primera construcción: toolbar ("Hoy"), cabecera de días y contenedor
         wrapper.innerHTML = '';
-        needsScrollToBase = true;
 
         const toolbar = document.createElement('div');
         toolbar.className = 'month-scroll-toolbar';
@@ -1156,14 +1467,52 @@ function renderMonthCalendar() {
         todayBtn.className = 'btn btn-secondary btn-sm';
         todayBtn.textContent = 'Hoy';
         todayBtn.addEventListener('click', () => {
+            // "Hoy": scroll animado hasta el mes actual, esté donde esté
+            // (si sus secciones no están materializadas, se materializan al llegar)
+            setAnchorDate(new Date());
             const now = new Date();
-            appState.currentMonthDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            appState.selectedDayDate = now.toISOString();
-            monthScrollRange = null; // fuerza rango nuevo centrado en hoy
-            dayPanelOpen = true;     // "Hoy" equivale a seleccionar el día de hoy
-            renderMonthCalendar();
+            const cont = document.getElementById('monthScrollContainer');
+            if (cont) {
+                const prevSel = cont.querySelector('.month-day-cell.selected-day');
+                if (prevSel) prevSel.classList.remove('selected-day');
+                const sec = cont.querySelector(
+                    `.month-section[data-year="${now.getFullYear()}"][data-month="${now.getMonth()}"]`
+                );
+                if (sec) {
+                    const todayCell = sec.querySelector(`.month-day-cell[data-day="${now.getDate()}"]`);
+                    if (todayCell) todayCell.classList.add('selected-day');
+                }
+            }
+            scrollToMonthSection(now, true);
         });
         toolbar.appendChild(todayBtn);
+
+        // Grupo derecho de la barra superior (estilo iOS): alumnos y salir
+        const topActions = document.createElement('div');
+        topActions.className = 'month-top-actions';
+
+        const studentsFloatBtn = document.createElement('button');
+        studentsFloatBtn.type = 'button';
+        studentsFloatBtn.className = 'day-icon-btn';
+        studentsFloatBtn.title = 'Ver alumnos';
+        studentsFloatBtn.setAttribute('aria-label', 'Ver alumnos');
+        studentsFloatBtn.textContent = '👥';
+        studentsFloatBtn.addEventListener('click', () => {
+            renderStudentsDropdown();
+            openModal('studentsModal');
+        });
+        topActions.appendChild(studentsFloatBtn);
+
+        const homeFloatBtn = document.createElement('button');
+        homeFloatBtn.type = 'button';
+        homeFloatBtn.className = 'day-icon-btn';
+        homeFloatBtn.title = 'Cerrar sesión';
+        homeFloatBtn.setAttribute('aria-label', 'Cerrar sesión');
+        homeFloatBtn.textContent = '🏠';
+        homeFloatBtn.addEventListener('click', () => logout());
+        topActions.appendChild(homeFloatBtn);
+
+        toolbar.appendChild(topActions);
         wrapper.appendChild(toolbar);
 
         const weekdays = document.createElement('div');
@@ -1178,75 +1527,85 @@ function renderMonthCalendar() {
         container = document.createElement('div');
         container.id = 'monthScrollContainer';
         container.className = 'month-scroll-container';
-        container.addEventListener('scroll', onMonthScroll, { passive: true });
 
         // Pellizco sobre el mes: cambia el nivel de detalle de las celdas
-        // (separar dedos = más detalle · juntar dedos = más compacto)
+        // (separar dedos = más detalle · juntar dedos = más compacto).
+        // El cambio se encola y se aplica al soltar los dedos. lockPage: el
+        // scroll a congelar durante el gesto es el de la página.
         setupPinchGesture(container, {
-            onZoomIn: () => setMonthZoom(monthZoomLevel + 1),
-            onZoomOut: () => setMonthZoom(monthZoomLevel - 1)
+            lockPage: true,
+            onZoomIn: () => queueMonthZoom(monthZoomLevel + 1),
+            onZoomOut: () => queueMonthZoom(monthZoomLevel - 1),
+            onGestureEnd: () => applyPendingMonthZoom()
         });
 
         wrapper.appendChild(container);
     }
 
-    // Ancla: antes de reconstruir, apuntar qué mes está visible y en qué punto
-    // proporcional. Restaurar píxeles brutos falla cuando cambia la altura de
-    // las celdas (zoom): la misma cifra caería en otro mes.
-    let anchorYm = null;
-    let anchorProgress = 0;
-    if (!needsScrollToBase) {
-        const prevSections = container.querySelectorAll('.month-section');
-        const cutoff = container.scrollTop + 40;
-        let visibleSec = null;
-        prevSections.forEach(sec => {
-            if (sec.offsetTop <= cutoff) visibleSec = sec;
-        });
-        if (visibleSec) {
-            anchorYm = { y: visibleSec.dataset.year, m: visibleSec.dataset.month };
-            anchorProgress = visibleSec.offsetHeight > 0
-                ? (container.scrollTop - visibleSec.offsetTop) / visibleSec.offsetHeight
-                : 0;
-        }
-    }
+    // ¿La lista de meses está a la vista? (en vista de día el wrapper está oculto
+    // y no se puede ni medir ni recolocar el scroll de la página)
+    const monthListVisible = wrapper.style.display !== 'none';
 
-    // Clase de zoom en el contenedor (controla altura de celdas y estilo de chips)
+    // Clase de zoom ANTES de medir: controla las alturas de celda
     container.classList.remove('zoom-1', 'zoom-2');
     if (monthZoomLevel > 0) container.classList.add(`zoom-${monthZoomLevel}`);
 
-    const prevScrollTop = container.scrollTop;
-    container.innerHTML = '';
-    const cursor = new Date(monthScrollRange.start);
-    while (cursor <= monthScrollRange.end) {
-        container.appendChild(buildMonthSection(cursor.getFullYear(), cursor.getMonth()));
-        cursor.setMonth(cursor.getMonth() + 1);
-    }
+    // Con la app oculta (antes del login) no se puede medir: esperar
+    if (container.offsetParent === null && monthLayout.size === 0) return;
 
-    if (needsScrollToBase) {
-        const target = container.querySelector(
-            `.month-section[data-year="${baseMonth.getFullYear()}"][data-month="${baseMonth.getMonth()}"]`
+    if (monthLayout.size === 0 || monthZoomDirty) {
+        // (Re)construir el lienzo: primera vez, cambio de zoom o rotación.
+        // Ancla visual: mantener el mes visible en su sitio si lo hay.
+        let pin = null;
+        if (monthZoomDirty && monthListVisible && monthLayout.size > 0) {
+            const viewTop = -container.getBoundingClientRect().top;
+            for (let i = monthLayoutMin; i <= monthLayoutMax; i++) {
+                const l = monthLayout.get(i);
+                if (l.top <= viewTop + 90) {
+                    pin = { idx: i, progress: (viewTop + 90 - l.top) / l.height };
+                }
+            }
+        }
+        monthZoomDirty = false;
+
+        // Congelar la altura del zoom máximo en px EN ESTE MOMENTO: usar dvh
+        // en vivo desestabiliza el lienzo cuando Safari muestra/oculta su
+        // barra en pleno scroll (la altura del viewport cambia sola)
+        container.style.setProperty(
+            '--zoom2-cell',
+            `${Math.max(200, Math.round(window.innerHeight * 0.42) - 24)}px`
         );
-        if (target) container.scrollTop = target.offsetTop;
-    } else if (anchorYm) {
-        // Volver al mismo mes (y al mismo punto dentro de él) tras reconstruir
-        const anchorSec = container.querySelector(
-            `.month-section[data-year="${anchorYm.y}"][data-month="${anchorYm.m}"]`
-        );
-        container.scrollTop = anchorSec
-            ? anchorSec.offsetTop + anchorProgress * anchorSec.offsetHeight
-            : prevScrollTop;
+
+        container.querySelectorAll('.month-section').forEach(s => s.remove());
+        const centerIdx = pin
+            ? pin.idx
+            : monthIndex(baseMonth.getFullYear(), baseMonth.getMonth());
+        initMonthLayout(centerIdx);
+
+        const lay = monthLayout.get(centerIdx);
+        container.style.height = `${lay.top + lay.height + window.innerHeight * 2}px`;
+
+        if (monthListVisible) {
+            const containerTopPage = container.getBoundingClientRect().top + window.scrollY;
+            const progress = pin ? Math.min(Math.max(pin.progress, 0), 1) : 0;
+            window.scrollTo(0, Math.max(0, containerTopPage + lay.top - 90 + progress * lay.height));
+        }
+        updateVirtualMonths();
     } else {
-        container.scrollTop = prevScrollTop;
+        // Re-render por cambio de datos: reconstruir en el sitio la ventana
+        // materializada (posiciones idénticas → cero desplazamiento)
+        container.querySelectorAll('.month-section').forEach(s => s.remove());
+        updateVirtualMonths();
     }
 
     if (!appState.selectedDayDate) {
-        appState.selectedDayDate = new Date().toISOString();
+        setAnchorDate(new Date());
     }
 
     // Vista de día abierta → refrescarla (el mes queda oculto detrás);
     // si no, asegurar que el calendario mensual está visible
-    if (dayPanelOpen) {
-        renderDayClassesPanel(new Date(appState.selectedDayDate));
+    if (mobileViewLevel === 'day') {
+        renderDayClassesPanel(getAnchorDate());
     } else {
         const panel = document.getElementById('dayClassesPanel');
         if (panel) panel.classList.remove('visible');
@@ -1282,10 +1641,9 @@ function renderDayClassesPanel(date) {
     const backLabel = document.getElementById('dayBackMonthLabel');
     if (backLabel) backLabel.textContent = formatMonthYearSpanish(d).split(' ')[0];
 
-    // Alinear la semana activa con el día mostrado: tanto el guardado del
-    // formulario de clase como el drag táctil calculan la fecha final a
-    // partir de appState.currentWeekStart, no del día seleccionado.
-    appState.currentWeekStart = getMonday(d);
+    // La fecha mostrada es la ancla: semana y mes se derivan de ella
+    // (el guardado del formulario y el drag táctil usan currentWeekStart)
+    setAnchorDate(d);
 
     titleEl.textContent = `${weekdayName} ${formatDate(d)}`;
 
@@ -1391,9 +1749,6 @@ function renderDayClassesPanel(date) {
         const firstStartMin = timeStringToMinutes(classesForDay[0].startTime);
         gridEl.scrollTop = Math.max(0, ((firstStartMin - CONFIG.hoursStart * 60) / 60) * slotHeight - 20);
     }
-
-    // Guardar el día actualmente mostrado para el botón de añadir desde vista diaria
-    appState.selectedDayDate = d.toISOString();
 }
 
 // ==========================================
@@ -2786,21 +3141,42 @@ function renderMonitorsList() {
 
         const currentYear = new Date().getFullYear();
 
+        // Métricas del mes en curso, visibles sin desplegar detalles
+        const classesThisMonth = (stats.monthlyBreakdown[new Date().getMonth()] || {}).count || 0;
+        const hoursLabel = String(Math.round(stats.hoursThisMonth * 10) / 10).replace('.', ',');
+
+        const initials = String(monitor.name || '?')
+            .split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+
+        const emailLine = monitor.email
+            ? `<p>📧 ${monitor.email}</p>`
+            : '<p class="monitor-info-empty">📧 Sin email</p>';
+        const phoneLine = monitor.phone
+            ? `<p>📞 ${monitor.phone}</p>`
+            : '<p class="monitor-info-empty">📞 Sin teléfono</p>';
+
         card.innerHTML = `
             <div class="monitor-card-header">
-                <h3>👤 ${monitor.name}</h3>
+                <div class="monitor-card-id">
+                    <span class="monitor-avatar">${initials}</span>
+                    <h3>${monitor.name}</h3>
+                </div>
                 <div class="monitor-card-actions">
-                    <button class="btn-icon-sm" onclick="viewMonitorClasses('${monitor.id}')" title="Ver clases">📅</button>
-                    <button class="btn-icon-sm" onclick="editMonitor('${monitor.id}')" title="Editar">✏️</button>
-                    <button class="btn-icon-sm btn-danger-sm" onclick="confirmDeleteMonitor('${monitor.id}')" title="Eliminar">🗑️</button>
+                    <button class="btn-icon-sm" onclick="event.stopPropagation(); editMonitor('${monitor.id}')" title="Editar">✏️</button>
+                    <button class="btn-icon-sm btn-danger-sm" onclick="event.stopPropagation(); confirmDeleteMonitor('${monitor.id}')" title="Eliminar">🗑️</button>
                 </div>
             </div>
             <div class="monitor-card-info">
-                <p>📧 ${monitor.email || 'Sin email'}</p>
-                <p>📞 ${monitor.phone || 'Sin teléfono'}</p>
+                ${emailLine}
+                ${phoneLine}
             </div>
-            <button class="monitor-details-toggle" onclick="toggleMonitorDetails(this)">
-                Ver detalles ▼
+            <div class="monitor-card-stats">
+                <div class="stat-item"><span class="stat-value">${classesThisMonth}</span><span class="stat-label">Clases/mes</span></div>
+                <div class="stat-item"><span class="stat-value">${hoursLabel}h</span><span class="stat-label">Horas/mes</span></div>
+                <div class="stat-item"><span class="stat-value">${stats.totalStudents}</span><span class="stat-label">Alumnos</span></div>
+            </div>
+            <button class="monitor-details-toggle" onclick="event.stopPropagation(); toggleMonitorDetails(this)">
+                Ver detalles <span class="details-arrow">▾</span>
             </button>
             <div class="monitor-details-panel" style="display:none;">
                 <div class="monitor-details-section">
@@ -2823,6 +3199,12 @@ function renderMonitorsList() {
             </div>
         `;
 
+        // Tarjeta entera clicable → abre el calendario del monitor
+        card.addEventListener('click', () => viewMonitorClasses(monitor.id));
+        // Los clicks dentro del panel de detalles (tabla, año, pagos) no navegan
+        const detailsPanel = card.querySelector('.monitor-details-panel');
+        if (detailsPanel) detailsPanel.addEventListener('click', (e) => e.stopPropagation());
+
         container.appendChild(card);
     });
 }
@@ -2831,7 +3213,9 @@ function toggleMonitorDetails(btn) {
     const panel = btn.nextElementSibling;
     const open = panel.style.display === 'none';
     panel.style.display = open ? 'block' : 'none';
-    btn.textContent = open ? 'Ocultar detalles ▲' : 'Ver detalles ▼';
+    btn.classList.toggle('open', open);
+    // El primer nodo es el texto; la flecha (span) rota vía CSS
+    btn.firstChild.textContent = open ? 'Ocultar detalles ' : 'Ver detalles ';
 }
 
 function getMonthClasses(monitorId, year, month) {
@@ -2924,8 +3308,10 @@ function buildMonthRows(monitorId, year) {
                 </td>
             </tr>`;
 
+        const nowRef = new Date();
+        const isCurrentMonth = year === nowRef.getFullYear() && m === nowRef.getMonth();
         const clickAttr = empty ? '' : `style="cursor:pointer;" onclick="toggleMonthDetail(this)"`;
-        return `<tr class="${empty ? 'month-row-empty' : 'month-row-clickable'}" ${clickAttr}>
+        return `<tr class="${empty ? 'month-row-empty' : 'month-row-clickable'}${isCurrentMonth ? ' month-row-current' : ''}" ${clickAttr}>
             <td>${name}${empty ? '' : ' <span class="month-expand-icon">▸</span>'}</td>
             <td>${mClasses.length}</td>
             <td>${mHours.toFixed(1)}</td>
@@ -2996,6 +3382,86 @@ function changeMonitorYear(btn, monitorId, delta) {
 function openModal(modalId) {
     const modal = document.getElementById(modalId);
     modal.classList.add('active');
+}
+
+// ==========================================
+// SHEETS MÓVILES — arrastrar hacia abajo para cerrar (estilo iOS)
+// Se activa solo en móvil y solo cuando el contenido está scrolleado arriba.
+// Si el arrastre supera el umbral, el sheet se desliza fuera y se cierra;
+// si no, rebota a su sitio.
+// ==========================================
+function setupSheetDragDismiss() {
+    document.querySelectorAll('.modal').forEach(modal => {
+        const content = modal.querySelector('.modal-content');
+        if (!content) return;
+
+        let startY = 0;
+        let currentY = 0;
+        let draggingSheet = false;
+        let innerScrollEl = null;
+
+        content.addEventListener('touchstart', (e) => {
+            if (!isMobileLayout()) return;
+            if (e.touches.length !== 1) return;
+            // Solo iniciar si el contenido está arriba del todo: si hay scroll
+            // interno pendiente, el gesto es scroll, no cierre
+            if (content.scrollTop > 0) return;
+            // Listas con scroll propio dentro del sheet (alumnos, resultados…):
+            // si están scrolleadas, el gesto les pertenece a ellas
+            innerScrollEl = e.target.closest(
+                '.students-modal-list, .search-classes-results, .player-results, .profile-payments-list, .monitor-students-list'
+            );
+            if (innerScrollEl && innerScrollEl.scrollTop > 0) return;
+            startY = e.touches[0].clientY;
+            currentY = 0;
+            draggingSheet = true;
+        }, { passive: true });
+
+        content.addEventListener('touchmove', (e) => {
+            if (!draggingSheet) return;
+            // Si la lista interna empezó a scrollear, ceder el gesto
+            if (innerScrollEl && innerScrollEl.scrollTop > 0) {
+                draggingSheet = false;
+                currentY = 0;
+                content.style.transform = '';
+                return;
+            }
+            const dy = e.touches[0].clientY - startY;
+            if (dy <= 0) {
+                // Hacia arriba: soltar el gesto y dejar scrollear con normalidad
+                currentY = 0;
+                content.style.transform = '';
+                return;
+            }
+            currentY = dy;
+            content.style.transition = 'none';
+            content.style.transform = `translateY(${dy}px)`;
+            // Evitar que el navegador haga scroll/rebote mientras movemos el sheet
+            e.preventDefault();
+        }, { passive: false });
+
+        const endSheetDrag = () => {
+            if (!draggingSheet) return;
+            draggingSheet = false;
+            content.style.transition = 'transform 0.25s cubic-bezier(0.32, 0.72, 0, 1)';
+            const threshold = Math.min(content.offsetHeight * 0.3, 160);
+            if (currentY > threshold) {
+                // Umbral superado → deslizar fuera y cerrar
+                content.style.transform = 'translateY(100%)';
+                setTimeout(() => {
+                    closeModal(modal.id);
+                    content.style.transform = '';
+                    content.style.transition = '';
+                }, 220);
+            } else {
+                // No llegó → rebotar a su sitio
+                content.style.transform = '';
+                setTimeout(() => { content.style.transition = ''; }, 260);
+            }
+        };
+        content.addEventListener('touchend', endSheetDrag);
+        content.addEventListener('touchcancel', endSheetDrag);
+    });
 }
 
 function closeModal(modalId) {
@@ -3494,19 +3960,13 @@ async function handleMonitorFormSubmit(e) {
 function navigateWeek(direction) {
     const currentWeek = new Date(appState.currentWeekStart);
     currentWeek.setDate(currentWeek.getDate() + (direction * 7));
-    appState.currentWeekStart = currentWeek;
-    // Sincronizar mes y día seleccionado con la nueva semana
-    appState.currentMonthDate = new Date(currentWeek);
-    appState.selectedDayDate = currentWeek.toISOString();
+    setAnchorDate(currentWeek);
     renderWeekTitle();
     renderCalendar();
 }
 
 function goToToday() {
-    const today = new Date();
-    appState.currentWeekStart = getMonday(today);
-    appState.currentMonthDate = new Date(today);
-    appState.selectedDayDate = today.toISOString();
+    setAnchorDate(new Date());
     renderWeekTitle();
     renderCalendar();
 }
@@ -3567,7 +4027,7 @@ async function copyCurrentWeekToNext() {
         saveToLocalStorage();
 
         // Movernos visualmente a la semana destino para que el usuario vea el resultado
-        appState.currentWeekStart = targetWeekStart;
+        setAnchorDate(targetWeekStart);
         renderWeekTitle();
         renderCalendar();
 
@@ -4304,17 +4764,26 @@ window.addEventListener('resize', () => {
 });
 
 // Cambiar entre calendario semanal (escritorio) y mensual (móvil) al
-// redimensionar o rotar el dispositivo, sin necesidad de recargar.
-let _lastLayoutIsMobile = window.innerWidth <= 768;
+// redimensionar la ventana, sin necesidad de recargar. En un dispositivo
+// táctil girar el teléfono NO cambia de vista (isMobileLayout ignora el giro).
+let _lastLayoutIsMobile = isMobileLayout();
 let _layoutResizeTimer = null;
+let _lastViewportWidth = window.innerWidth;
 window.addEventListener('resize', () => {
     clearTimeout(_layoutResizeTimer);
     _layoutResizeTimer = setTimeout(() => {
-        const nowMobile = window.innerWidth <= 768;
+        const nowMobile = isMobileLayout();
         if (nowMobile !== _lastLayoutIsMobile) {
             _lastLayoutIsMobile = nowMobile;
             renderCalendar();
+        } else if (nowMobile && window.innerWidth !== _lastViewportWidth) {
+            // Rotación REAL (cambió el ancho): rehacer el lienzo virtualizado.
+            // Los resize de solo-altura (Safari mostrando/ocultando su barra
+            // durante el scroll) NO deben reconstruir nada: causaban el "pum".
+            monthZoomDirty = true;
+            renderMonthCalendar();
         }
+        _lastViewportWidth = window.innerWidth;
     }, 150);
 });
 
@@ -5063,10 +5532,7 @@ function initializeEventListeners() {
     }
 
     function setMonthYear(month, year) {
-        const newDate = new Date(year, month, 1);
-        appState.currentMonthDate = newDate;
-        appState.currentWeekStart = getMonday(newDate);
-        appState.selectedDayDate = newDate.toISOString();
+        setAnchorDate(new Date(year, month, 1));
         updateMonthYearTitles();
         renderWeekTitle();
         renderCalendar();
@@ -5186,8 +5652,8 @@ function initializeEventListeners() {
         addFromDayViewBtn.addEventListener('click', () => {
             const now = new Date();
 
-            // Tomar como base el día que se está mostrando en la vista diaria
-            const baseDate = appState.selectedDayDate ? new Date(appState.selectedDayDate) : new Date();
+            // La fecha ancla ES el día mostrado en la vista diaria
+            const baseDate = getAnchorDate();
 
             // Usar la hora actual (redondeada a la hora entera) como referencia
             const currentHour = now.getHours();
@@ -5197,9 +5663,6 @@ function initializeEventListeners() {
 
             const weekdayIndex = (baseDate.getDay() + 6) % 7; // 0=Lunes
             const weekdayName = CONFIG.days[weekdayIndex];
-
-            // La fecha final se calcula desde currentWeekStart: alinearla con el día mostrado
-            appState.currentWeekStart = getMonday(baseDate);
 
             // Abrimos el modal de nueva clase con el día y la hora sugeridos
             openAddClassModal(weekdayName, clampedHour);
@@ -5217,12 +5680,34 @@ function initializeEventListeners() {
     if (dayBackBtnEl) dayBackBtnEl.addEventListener('click', closeDayViewToMonth);
 
     // Pellizco juntando dedos en la vista de día → volver al mes
+    // (encolado: el cambio de vista se aplica al soltar los dedos)
+    // Swipe horizontal → día anterior / siguiente
     const dayViewGridEl = getEl('dayViewGrid');
     if (dayViewGridEl) {
+        let dayPinchCloseQueued = false;
         setupPinchGesture(dayViewGridEl, {
-            onZoomOut: () => closeDayViewToMonth()
+            onZoomOut: () => {
+                dayPinchCloseQueued = true;
+                if (window.navigator.vibrate) window.navigator.vibrate(20);
+            },
+            onGestureEnd: () => {
+                if (dayPinchCloseQueued) {
+                    dayPinchCloseQueued = false;
+                    closeDayViewToMonth();
+                }
+            }
         });
+        setupDaySwipe(dayViewGridEl);
     }
+
+    // Botones ‹ › de la vista de día
+    const prevDayBtnEl = getEl('prevDayBtn');
+    if (prevDayBtnEl) prevDayBtnEl.addEventListener('click', () => navigateDay(-1));
+    const nextDayBtnEl = getEl('nextDayBtn');
+    if (nextDayBtnEl) nextDayBtnEl.addEventListener('click', () => navigateDay(1));
+
+    // Sheets móviles: arrastrar hacia abajo para cerrar cualquier modal
+    setupSheetDragDismiss();
 
     const closeSidebarBtnEl = getEl('closeSidebarBtn');
     if (closeSidebarBtnEl) {
@@ -5331,10 +5816,7 @@ async function initializeApp() {
 
         // Inicializar fechas, títulos y listeners siempre, antes del check de sesión,
         // para que estén listos cuando el usuario haga login.
-        const today = new Date();
-        appState.currentWeekStart = getMonday(today);
-        appState.currentMonthDate = new Date(today);
-        appState.selectedDayDate = today.toISOString();
+        setAnchorDate(new Date());
         renderWeekTitle();
         renderCalendar();
         initializeEventListeners();
