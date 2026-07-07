@@ -925,6 +925,8 @@ function closeDayViewToMonth() {
         mobileViewLevel = 'month';
         const panel = document.getElementById('dayClassesPanel');
         if (panel) panel.classList.remove('visible');
+        // Restaurar el scroll de la página antes de recolocar el mes
+        document.body.classList.remove('day-view-open');
         const monthWrapper = document.getElementById('monthCalendarWrapper');
         if (monthWrapper) monthWrapper.style.display = '';
         // Refrescar las secciones (los datos pudieron cambiar en la vista de
@@ -1409,6 +1411,12 @@ function onMonthScroll() {
     if (!isMobileLayout() || mobileViewLevel !== 'month') return;
     const container = document.getElementById('monthScrollContainer');
     if (!container || container.dataset.pinching === '1') return;
+    // El calendario puede estar oculto aunque mobileViewLevel siga en 'month'
+    // (p. ej. en el panel del coordinador, con #calendarSectionContainer en
+    // display:none): con un ancestro oculto getBoundingClientRect() da 0 y el
+    // rebase creería que falta margen arriba, disparando un window.scrollTo
+    // que da el "pum". offsetParent === null detecta ese ancestro oculto.
+    if (container.offsetParent === null) return;
 
     updateVirtualMonths();
 
@@ -1425,6 +1433,9 @@ function maybeExtendHeadroom() {
     if (!isMobileLayout() || mobileViewLevel !== 'month') return;
     const container = document.getElementById('monthScrollContainer');
     if (!container || container.dataset.pinching === '1' || monthLayout.size === 0) return;
+    // No reposicionar el scroll si el calendario está oculto (ancestro en
+    // display:none): el rect vale 0 y el rebase daría un salto de scroll
+    if (container.offsetParent === null) return;
     const viewTop = -container.getBoundingClientRect().top;
     if (viewTop > window.innerHeight * 3) return; // aún hay margen de sobra
     // Con el scroll en calma el rebase es 100% invisible: reponer 3 años de
@@ -1461,6 +1472,24 @@ function renderMonthCalendar() {
 
         const toolbar = document.createElement('div');
         toolbar.className = 'month-scroll-toolbar';
+
+        // Grupo izquierdo: píldora "‹ Panel" (solo coordinador viendo el
+        // calendario de un monitor; la cabecera en flujo quedaba tapada por
+        // esta barra fija y se perdía al scrollear) + botón "Hoy"
+        const leftActions = document.createElement('div');
+        leftActions.className = 'month-top-actions';
+
+        const backToPanelBtn = document.createElement('button');
+        backToPanelBtn.type = 'button';
+        backToPanelBtn.id = 'monthBackToPanelBtn';
+        backToPanelBtn.className = 'day-back-btn';
+        backToPanelBtn.title = 'Volver al panel de coordinador';
+        backToPanelBtn.setAttribute('aria-label', 'Volver al panel de coordinador');
+        backToPanelBtn.innerHTML = '<span class="day-back-chevron">‹</span> Panel';
+        backToPanelBtn.style.display = 'none';
+        backToPanelBtn.addEventListener('click', () => backToCoordinatorDashboard());
+        leftActions.appendChild(backToPanelBtn);
+
         const todayBtn = document.createElement('button');
         todayBtn.type = 'button';
         todayBtn.id = 'monthScrollTodayBtn';
@@ -1485,11 +1514,21 @@ function renderMonthCalendar() {
             }
             scrollToMonthSection(now, true);
         });
-        toolbar.appendChild(todayBtn);
+        leftActions.appendChild(todayBtn);
+        toolbar.appendChild(leftActions);
 
-        // Grupo derecho de la barra superior (estilo iOS): alumnos y salir
+        // Grupo derecho de la barra superior (estilo iOS): buscar, alumnos y salir
         const topActions = document.createElement('div');
         topActions.className = 'month-top-actions';
+
+        const searchFloatBtn = document.createElement('button');
+        searchFloatBtn.type = 'button';
+        searchFloatBtn.className = 'day-icon-btn';
+        searchFloatBtn.title = 'Buscar clases por alumno';
+        searchFloatBtn.setAttribute('aria-label', 'Buscar clases por alumno');
+        searchFloatBtn.textContent = '🔍';
+        searchFloatBtn.addEventListener('click', () => openSearchClassesModal());
+        topActions.appendChild(searchFloatBtn);
 
         const studentsFloatBtn = document.createElement('button');
         studentsFloatBtn.type = 'button';
@@ -1540,6 +1579,14 @@ function renderMonthCalendar() {
         });
 
         wrapper.appendChild(container);
+    }
+
+    // La píldora "‹ Panel" solo se muestra cuando un coordinador está viendo
+    // el calendario de un monitor (la barra persiste entre renders)
+    const backToPanelBtn = document.getElementById('monthBackToPanelBtn');
+    if (backToPanelBtn) {
+        backToPanelBtn.style.display =
+            (isCoordinator() && appState.viewingMonitorId) ? '' : 'none';
     }
 
     // ¿La lista de meses está a la vista? (en vista de día el wrapper está oculto
@@ -1609,6 +1656,7 @@ function renderMonthCalendar() {
     } else {
         const panel = document.getElementById('dayClassesPanel');
         if (panel) panel.classList.remove('visible');
+        document.body.classList.remove('day-view-open');
         wrapper.style.display = '';
     }
 }
@@ -1629,6 +1677,8 @@ function renderDayClassesPanel(date) {
     if (!panel || !titleEl || !gridEl) return;
 
     panel.classList.add('visible');
+    // Vista de día a pantalla completa: bloquear el scroll de la página de fondo
+    document.body.classList.add('day-view-open');
 
     const d = new Date(date);
     const weekdayIndex = (d.getDay() + 6) % 7; // 0=Lunes
@@ -1649,19 +1699,9 @@ function renderDayClassesPanel(date) {
 
     const classesForDay = getClassesForDate(d);
 
-    // Estado vacío explícito con la acción disponible
-    let emptyMsg = document.getElementById('dayViewEmptyMsg');
-    if (classesForDay.length === 0) {
-        if (!emptyMsg) {
-            emptyMsg = document.createElement('p');
-            emptyMsg.id = 'dayViewEmptyMsg';
-            emptyMsg.className = 'day-classes-empty';
-            panel.insertBefore(emptyMsg, gridEl);
-        }
-        emptyMsg.textContent = 'No hay clases este día. Toca una hora libre o "+ Nueva clase" para crear una.';
-    } else if (emptyMsg) {
-        emptyMsg.remove();
-    }
+    // Sin aviso de "no hay clases": la rejilla de horas vacía ya lo comunica.
+    const emptyMsg = document.getElementById('dayViewEmptyMsg');
+    if (emptyMsg) emptyMsg.remove();
 
     gridEl.innerHTML = '';
     const timeColumn = document.createElement('div');
@@ -1960,6 +2000,13 @@ function createClassCard(cls) {
     card.style.height = `${cardHeight}px`;
     card.style.boxSizing = 'border-box';
 
+    // Posición según los MINUTOS de inicio dentro de su hora: una clase de
+    // 20:30 nace a media celda de la línea de las 20:00 (y = min/60 × alto)
+    const minuteOffset = startMinutes % 60;
+    if (minuteOffset > 0) {
+        card.style.top = `${Math.round((minuteOffset / 60) * slotHeight)}px`;
+    }
+
 
     // Mejor separación visual: el nombre del monitor va debajo de la hora, con margen
     let monitorDisplay = '';
@@ -2099,8 +2146,14 @@ function createClassCard(cls) {
 
             const newStartTime = minutesToTime(finalStart);
             const newEndTime = minutesToTime(finalEnd);
-            const newDay = CONFIG.days[finalDayIndex];
-            const newDate = getDateForDay(appState.currentWeekStart, finalDayIndex).toISOString();
+            // Fijar la fecha a mediodía local antes de serializar: evita que
+            // toISOString (UTC) cruce la medianoche y desplace el día natural.
+            const movedDate = getDateForDay(appState.currentWeekStart, finalDayIndex);
+            const normalizedDate = new Date(
+                movedDate.getFullYear(), movedDate.getMonth(), movedDate.getDate(), 12, 0, 0
+            );
+            const newDay = CONFIG.days[(normalizedDate.getDay() + 6) % 7];
+            const newDate = normalizedDate.toISOString();
 
             // Reset visual transform
             card.style.transform = '';
@@ -2301,13 +2354,20 @@ function createClassCard(cls) {
                     dayShift = Math.round(deltaX / dayCellWidth);
                 }
 
-                let finalDayIndex = initialDayIndex + dayShift;
-                if (finalDayIndex < 0) finalDayIndex = 0;
-                if (finalDayIndex > 6) finalDayIndex = 6;
-
+                // La vista de día se posiciona por cls.date (no por cls.day) y
+                // NO cambia de día (dayShift=0). Anclamos la fecha nueva al día
+                // natural REAL que ocupa la clase y solo cambiamos la hora.
+                // Reconstruir desde currentWeekStart+cls.day saltaba de día si
+                // cls.day estaba desincronizado con cls.date; además fijamos la
+                // hora a mediodía local para evitar el desfase de UTC/toISOString.
+                const baseDate = new Date(cls.date);
+                const shifted = new Date(
+                    baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + dayShift, 12, 0, 0
+                );
                 const candidateStart = minutesToTime(finalStart);
                 const candidateEnd = minutesToTime(finalEnd);
-                const candidateDate = getDateForDay(appState.currentWeekStart, finalDayIndex).toISOString();
+                const candidateDate = shifted.toISOString();
+                const candidateDay = CONFIG.days[(shifted.getDay() + 6) % 7];
 
                 // Comprobar solapamiento con otra clase antes de aplicar cambios
                 if (hasClassTimeConflict(candidateDate, candidateStart, candidateEnd, cls.id)) {
@@ -2318,7 +2378,7 @@ function createClassCard(cls) {
                 markClassPendingSave(cls.id, {
                     startTime: candidateStart,
                     endTime: candidateEnd,
-                    day: CONFIG.days[finalDayIndex],
+                    day: candidateDay,      // re-sincroniza cls.day con cls.date
                     date: candidateDate
                 });
             }
@@ -3392,6 +3452,8 @@ function openModal(modalId) {
 // ==========================================
 function setupSheetDragDismiss() {
     document.querySelectorAll('.modal').forEach(modal => {
+        // Las alertas centradas (.modal-center) no son sheets: sin arrastre
+        if (modal.classList.contains('modal-center')) return;
         const content = modal.querySelector('.modal-content');
         if (!content) return;
 
@@ -3409,7 +3471,7 @@ function setupSheetDragDismiss() {
             // Listas con scroll propio dentro del sheet (alumnos, resultados…):
             // si están scrolleadas, el gesto les pertenece a ellas
             innerScrollEl = e.target.closest(
-                '.students-modal-list, .search-classes-results, .player-results, .profile-payments-list, .monitor-students-list'
+                '.students-modal-list, .search-classes-results, .player-results, .profile-payments-list, .profile-add-section, .monitor-students-list'
             );
             if (innerScrollEl && innerScrollEl.scrollTop > 0) return;
             startY = e.touches[0].clientY;
@@ -3512,7 +3574,14 @@ function openEditClassModal(classId) {
     form.reset();
 
     document.getElementById('classModalTitle').textContent = 'Editar Clase';
-    document.getElementById('classDay').value = cls.day;
+    // El día se toma de la FECHA real de la clase, no del campo cls.day (que
+    // podía estar desincronizado y hacía saltar la clase de día al guardar).
+    // Además alineamos la semana activa con esa fecha para que el guardado
+    // (getDateForDay sobre currentWeekStart) recomponga el día correcto.
+    const clsRealDate = new Date(cls.date);
+    const realDayName = CONFIG.days[(clsRealDate.getDay() + 6) % 7];
+    setAnchorDate(clsRealDate);
+    document.getElementById('classDay').value = realDayName;
 
     const startParts = cls.startTime.split(':');
     document.getElementById('classStartHour').value = startParts[0];
@@ -3703,7 +3772,10 @@ async function handleClassFormSubmit(e) {
         showLoading('Guardando clase...');
 
         const dayIndex = CONFIG.days.indexOf(day);
-        const date = getDateForDay(appState.currentWeekStart, dayIndex);
+        // Fecha a mediodía local antes de serializar: evita el desfase de UTC
+        // (toISOString cruzando la medianoche) al calcular el día natural.
+        const rawDate = getDateForDay(appState.currentWeekStart, dayIndex);
+        const date = new Date(rawDate.getFullYear(), rawDate.getMonth(), rawDate.getDate(), 12, 0, 0);
         const excludeId = appState.selectedClass || null;
 
         if (hasClassTimeConflict(date, startTime, endTime, excludeId)) {
@@ -4315,8 +4387,13 @@ function switchRecepcionTab(tab) {
     document.getElementById('recepcionTabTorneos').classList.toggle('active', tab === 'torneos');
 
     // El buscador de alumnos solo aplica a la vista de pagos.
+    // Escritorio: visibility (no mueve el layout). Móvil: la clase
+    // search-hidden lo quita del flujo (display:none) y recupera la altura.
     const searchWrap = document.getElementById('recepcionSearchWrap');
-    if (searchWrap) searchWrap.style.visibility = tab === 'pagos' ? 'visible' : 'hidden';
+    if (searchWrap) {
+        searchWrap.style.visibility = tab === 'pagos' ? 'visible' : 'hidden';
+        searchWrap.classList.toggle('search-hidden', tab !== 'pagos');
+    }
 
     if (tab === 'pagos') renderRecepcionStudentsList();
     else if (tab === 'caja') openCajaView();
@@ -4945,6 +5022,30 @@ function timeFromPointer(host, col, clientY) {
 }
 
 function attachCalendarInteractions(host) {
+    // MÓVIL: sin arrastre (touch-action:none mataba el scroll de la página y
+    // el drag con el dedo era impreciso). Como con las clases: tap en un
+    // bloque = abrirlo; tap en un hueco = montar partido a esa hora y pista.
+    if (isMobileLayout()) {
+        host.onpointerdown = null;
+        host.onpointermove = null;
+        host.onpointerup = null;
+        host.ondblclick = null;
+        host.onclick = (e) => {
+            const block = e.target.closest('.cal-block');
+            if (block) {
+                openMatchFromCalendar(block.dataset.matchId);
+                return;
+            }
+            const col = e.target.closest('.cal-court-col');
+            if (!col) return;
+            const court = parseInt(col.dataset.court, 10);
+            const min = timeFromPointer(host, col, e.clientY);
+            openCreateMatchModal({ court, time: minutesToTime(min) });
+        };
+        return;
+    }
+    host.onclick = null;
+
     let drag = null; // { id, block, origCourt, moved }
 
     host.onpointerdown = (e) => {
@@ -5381,19 +5482,34 @@ function viewMonitorClasses(monitorId) {
     const monitor = getMonitorById(monitorId);
     if (!monitor) return;
 
-    document.getElementById('coordinatorDashboard').style.display = 'none';
-    document.getElementById('calendarSectionContainer').style.display = 'block';
-
     appState.viewingMonitorId = monitorId;
 
-    renderWeekTitle();
-    renderCalendar();
+    // withViewTransition solo anima en móvil; en escritorio ejecuta tal cual
+    withViewTransition(() => {
+        document.getElementById('coordinatorDashboard').style.display = 'none';
+        document.getElementById('calendarSectionContainer').style.display = 'block';
+
+        renderWeekTitle();
+        renderCalendar();
+
+        // En móvil el panel puede estar scrolleado muy abajo: recolocar el
+        // scroll de la página sobre el mes ancla del calendario del monitor
+        // (solo con la lista de meses visible; en vista de día no se mide)
+        if (isMobileLayout() && mobileViewLevel === 'month') {
+            scrollToMonthSection(getAnchorDate(), false);
+        }
+    });
 }
 
 function backToCoordinatorDashboard() {
     appState.viewingMonitorId = null;
-    renderWeekTitle();
-    showCoordinatorDashboard();
+    withViewTransition(() => {
+        renderWeekTitle();
+        showCoordinatorDashboard();
+        // El calendario deja el scroll de la página a miles de px: el panel
+        // debe verse desde arriba
+        if (isMobileLayout()) window.scrollTo(0, 0);
+    });
 }
 
 function goHome() {
@@ -5669,9 +5785,8 @@ function initializeEventListeners() {
         });
     }
 
-    // Búsqueda de clases por alumno (botón 🔍 de la vista de día)
-    const daySearchBtnEl = getEl('daySearchBtn');
-    if (daySearchBtnEl) daySearchBtnEl.addEventListener('click', openSearchClassesModal);
+    // Búsqueda de clases por alumno (el botón 🔍 vive en la barra superior
+    // del mes, creado en renderMonthCalendar)
     const searchClassesInputEl = getEl('searchClassesInput');
     if (searchClassesInputEl) searchClassesInputEl.addEventListener('input', renderSearchClassesResults);
 

@@ -461,7 +461,8 @@ async function openTournament(id) {
         showLoading('Cargando torneo...');
         await loadTournamentDetail(id);
         hideLoading();
-        renderTournamentDetail();
+        // Navegación tipo pila listado → detalle (anima solo en móvil)
+        withViewTransition(() => renderTournamentDetail());
     } catch (e) {
         hideLoading();
         showToast('Error al cargar el torneo', 'error');
@@ -481,7 +482,9 @@ function renderTournamentDetail() {
 
     detailView.innerHTML = `
         <div class="t-detail-header">
-            <button class="btn btn-secondary btn-sm" onclick="backToTournamentsList()">← Volver a torneos</button>
+            <button class="day-back-btn" type="button" onclick="backToTournamentsList()" aria-label="Volver al listado de torneos">
+                <span class="day-back-chevron">‹</span> Torneos
+            </button>
             <h3 class="t-detail-title">${escapeHtml(ct.name)}</h3>
             ${winner ? `<span class="t-champion">🏆 Campeón: ${escapeHtml(pairLabel(winner))}</span>` : ''}
         </div>
@@ -501,9 +504,11 @@ function renderTournamentDetail() {
 
 function backToTournamentsList() {
     appState.currentTournament = null;
-    document.getElementById('tournamentDetailView').style.display = 'none';
-    document.getElementById('tournamentsListView').style.display = '';
-    renderTournamentsView();
+    withViewTransition(() => {
+        document.getElementById('tournamentDetailView').style.display = 'none';
+        document.getElementById('tournamentsListView').style.display = '';
+        renderTournamentsView();
+    });
 }
 
 // Calcula la clasificación de un grupo: nº de victorias, desempate por seed.

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agridulce Padel Club</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=58">
+    <link rel="stylesheet" href="styles.css?v=68">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -335,7 +335,6 @@
                             <span id="dayBackMonthLabel">Mes</span>
                         </button>
                         <div class="day-header-actions">
-                            <button class="day-icon-btn" id="daySearchBtn" type="button" title="Buscar clases por alumno" aria-label="Buscar clases por alumno">🔍</button>
                             <button class="btn btn-primary btn-sm" id="addClassFromDayViewBtn" type="button" title="Añadir clase en este día" aria-label="Añadir clase en este día">+</button>
                         </div>
                     </div>
@@ -627,8 +626,8 @@
         </div>
     </div>
 
-    <!-- Modal: Save Changes -->
-    <div class="modal" id="saveChangesModal">
+    <!-- Modal: Save Changes (alerta centrada, no sheet) -->
+    <div class="modal modal-center" id="saveChangesModal">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Guardar Cambios</h3>
@@ -680,8 +679,8 @@
         </div>
     </div>
 
-    <!-- Modal: Confirm Changes -->
-    <div class="modal" id="confirmChangesModal">
+    <!-- Modal: Confirm Changes (alerta centrada, no sheet) -->
+    <div class="modal modal-center" id="confirmChangesModal">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Confirmar Cambios</h3>
@@ -902,9 +901,9 @@
     <!-- 3. Then load database layer -->
     <script src="db.js?v=24"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=58"></script>
+    <script src="app.js?v=69"></script>
     <!-- 5. Torneos (depende de app.js y db.js) -->
-    <script src="tournaments.js?v=24"></script>
+    <script src="tournaments.js?v=25"></script>
 </body>
 
 </html>

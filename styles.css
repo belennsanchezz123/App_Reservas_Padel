@@ -1440,9 +1440,10 @@ body {
     flex-shrink: 0;
 }
 
-.students-sheet-toolbar input {
-    flex: 1;
+.students-sheet .students-sheet-toolbar input {
+    flex: 1 1 140px;
     min-width: 0;
+    width: auto;
     padding: var(--spacing-sm) var(--spacing-md);
     border: 1px solid var(--gray-200);
     border-radius: var(--radius-md);
@@ -1450,12 +1451,15 @@ body {
     outline: none;
 }
 
-.students-sheet-toolbar input:focus {
+.students-sheet .students-sheet-toolbar input:focus {
     border-color: var(--primary-green);
 }
 
-.students-sheet-toolbar .btn {
-    flex-shrink: 0;
+/* Especificidad alta a propósito: el modal vive dentro de .quick-actions y
+   la regla móvil ".quick-actions .btn { width: 100% }" inflaba este botón */
+.students-sheet .students-sheet-toolbar .btn {
+    width: auto;
+    flex: 0 0 auto;
     white-space: nowrap;
 }
 
@@ -1629,6 +1633,12 @@ body {
 
 .day-view-time-column .time-slot {
     background: var(--gray-50);
+    /* La etiqueta se alinea con el BORDE SUPERIOR de su fila, que es la línea
+       donde empieza la hora: "07:00" arranca justo en la primera línea (sin
+       corte) y una clase de HH:00 nace a la misma altura que su etiqueta. */
+    align-items: flex-start;
+    padding-top: 4px;
+    line-height: 1;
 }
 
 .day-view-day-column .calendar-cell {
@@ -1700,6 +1710,19 @@ body {
 
     to {
         transform: translateY(0);
+    }
+}
+
+/* Entrada de las alertas centradas: pequeño "pop" (estilo alerta de iOS) */
+@keyframes alertPop {
+    from {
+        transform: scale(0.92);
+        opacity: 0;
+    }
+
+    to {
+        transform: scale(1);
+        opacity: 1;
     }
 }
 
@@ -2287,10 +2310,45 @@ form {
         display: block;
     }
 
-    /* El panel del día solo aparece tras tocar un día en el calendario */
+    /* Vista de día a PANTALLA COMPLETA con UNA sola superficie de scroll
+       (estilo calendario de iOS): la barra superior y el título quedan fijos,
+       y solo la rejilla de horas se desplaza. La página de detrás no scrollea
+       (body.day-view-open la bloquea). */
     .day-classes-panel.visible {
-        display: block;
-        margin-top: var(--spacing-md);
+        display: flex;
+        flex-direction: column;
+        position: fixed;
+        inset: 0;
+        z-index: 300;              /* sobre el calendario, bajo los modales */
+        margin: 0;
+        padding: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: white;
+        padding-top: env(safe-area-inset-top);
+    }
+
+    .day-classes-panel.visible .day-classes-header {
+        flex-shrink: 0;
+        padding: var(--spacing-md) var(--spacing-md) var(--spacing-sm);
+    }
+
+    .day-classes-panel.visible .day-title-row {
+        flex-shrink: 0;
+        padding: 0 var(--spacing-md) var(--spacing-sm);
+        margin-bottom: 0;
+    }
+
+    /* La rejilla de horas ocupa el resto y es el ÚNICO scroll */
+    .day-classes-panel.visible .day-view-grid {
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+        border-left: none;
+        border-right: none;
+        border-radius: 0;
+        border-bottom: none;
+        padding-bottom: env(safe-area-inset-bottom);
     }
 
     .form-row {
@@ -2302,6 +2360,11 @@ form {
         justify-content: space-between;
         gap: var(--spacing-sm);
         margin-bottom: var(--spacing-md);
+    }
+
+    /* Con la vista de día abierta, la página de fondo no debe scrollear */
+    body.day-view-open {
+        overflow: hidden;
     }
 
 
@@ -2400,6 +2463,34 @@ form {
         background: var(--gray-300);
         margin: 8px auto 0;
         flex-shrink: 0;
+    }
+
+    /* EXCEPCIÓN: confirmaciones rápidas (.modal-center) = alerta centrada
+       estilo iOS, no sheet: tarjeta compacta en medio de la pantalla */
+    .modal.modal-center {
+        align-items: center;
+        padding: var(--spacing-lg);
+    }
+
+    .modal.modal-center .modal-content {
+        width: auto;
+        min-width: 290px;
+        max-width: 400px;
+        max-height: none;
+        border-radius: var(--radius-xl);
+        animation: alertPop 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+        padding-bottom: 0;
+    }
+
+    /* Sin asa de arrastre: no es un sheet */
+    .modal.modal-center .modal-content::before {
+        display: none;
+    }
+
+    .modal.modal-center .modal-header,
+    .modal.modal-center .modal-body,
+    .modal.modal-center .modal-actions {
+        padding: var(--spacing-md) var(--spacing-lg);
     }
 
     .modal-actions {
@@ -3115,16 +3206,42 @@ form {
         gap: var(--spacing-md);
     }
 
-    /* Acciones lado a lado (no apiladas a lo ancho) también en móvil */
+    /* Acciones lado a lado si caben; si no, se apilan solas (flex-wrap).
+       min-width:0 permite que encojan de verdad — sin él, flex:1 respeta el
+       ancho del texto y la suma de los dos botones desbordaba la pantalla,
+       ensanchando toda la página. flex-basis 140px = umbral para saltar a
+       apilado en pantallas muy estrechas. */
     .dashboard-header-actions {
         width: 100%;
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
     }
 
     .dashboard-header-actions .btn {
-        flex: 1 1 0;
+        flex: 1 1 140px;
+        min-width: 0;
         justify-content: center;
-        white-space: nowrap;
+    }
+
+    /* Red de seguridad: el panel del coordinador nunca desborda a lo ancho
+       (si algún contenido pide más ancho, se recorta en vez de scrollear
+       toda la página) */
+    .coordinator-dashboard {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+
+    /* Las 3 métricas (Clases/Horas/Alumnos) con hueco más ajustado para que
+       "Alumnos" no se corte en pantallas estrechas */
+    .monitor-card-stats {
+        gap: var(--spacing-sm);
+    }
+
+    .monitor-card-stats .stat-item {
+        min-width: 0;
+    }
+
+    .monitor-card-stats .stat-label {
+        letter-spacing: 0.2px;
     }
 }
 
@@ -3165,6 +3282,10 @@ form {
     background: var(--ink-900);
     padding: var(--spacing-lg);
     z-index: 9998;
+    /* Con el teclado abierto en iOS el contenido debe poder scrollear:
+       sin esto los campos de arriba quedan tapados y no se alcanzan */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .auth-card {
@@ -3174,6 +3295,19 @@ form {
     width: 100%;
     max-width: 420px;
     padding: var(--spacing-2xl);
+}
+
+/* En móvil el login se alinea ARRIBA (no centrado): con el teclado abierto,
+   centrar + overflow recorta la parte superior de la tarjeta y los campos
+   quedan inalcanzables aunque se intente scrollear. Alineado arriba, todos
+   los campos se alcanzan deslizando. */
+@media (max-width: 768px), ((hover: none) and (pointer: coarse) and (max-width: 950px)) {
+    .auth-screen {
+        align-items: flex-start;
+        justify-content: center;
+        padding: var(--spacing-xl) var(--spacing-md)
+                 calc(var(--spacing-xl) + env(safe-area-inset-bottom));
+    }
 }
 
 .auth-brand {
@@ -4722,3 +4856,320 @@ form {
 .cal-block-time { font-weight: 700; }
 .cal-block-players { opacity: 0.95; line-height: 1.2; }
 .cal-block-winner { font-weight: 700; margin-top: 2px; }
+/* ==========================================
+   MÓVIL — COORDINADOR Y RECEPCIÓN
+   Mismos patrones que la vista de monitor (sheets, píldoras ‹ Volver,
+   targets 44px, scroll contenido). El escritorio NO cambia: todo vive
+   dentro de esta media query.
+   ========================================== */
+@media (max-width: 768px), ((hover: none) and (pointer: coarse) and (max-width: 950px)) {
+
+    /* ---- COORDINADOR ------------------------------------------------ */
+
+    /* La vuelta al panel vive ahora en la barra fija del mes (píldora
+       "‹ Panel" creada en renderMonthCalendar): la cabecera en flujo
+       quedaba tapada por esa barra y desaparecía al scrollear */
+    #monitorViewHeader {
+        display: none !important;
+    }
+
+    /* La píldora comparte barra con [Hoy] y los iconos: compactarla */
+    .month-scroll-toolbar .day-back-btn {
+        padding: 6px 12px 6px 8px;
+    }
+
+    /* Targets táctiles de la tabla anual de pagos del monitor */
+    .monitor-year-btn {
+        width: 40px;
+        height: 40px;
+    }
+
+    .paid-checkbox {
+        width: 22px;
+        height: 22px;
+    }
+
+    /* Si la tabla anual no cupiera, scrollea en su propia caja (nunca
+       ensancha la página) */
+    .monitor-details-panel {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Sin scroll anidado dentro del scroll de la página: la lista de
+       alumnos del monitor crece entera */
+    .monitor-students-list {
+        max-height: none;
+        overflow-y: visible;
+    }
+
+    /* ---- RECEPCIÓN: cabecera y buscador ------------------------------ */
+
+    .recepcion-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--spacing-md);
+    }
+
+    .recepcion-search-wrap {
+        width: 100%;
+        min-width: unset;
+        min-height: 44px;
+    }
+
+    /* Fuera de la pestaña Pagos el buscador no reserva espacio en móvil
+       (la clase la pone switchRecepcionTab) */
+    .recepcion-search-wrap.search-hidden {
+        display: none;
+    }
+
+    .recepcion-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* ---- FICHA DE ALUMNO (patrón .students-sheet) --------------------
+       Cabecera, resumen y botones de alta fijos; SOLO la lista de pagos
+       scrollea y su final siempre es alcanzable. La lista ya está
+       registrada en las listas internas de setupSheetDragDismiss. */
+    #studentProfileModal .modal-content {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    #studentProfileModal .modal-header {
+        flex-shrink: 0;
+    }
+
+    #studentProfileModal .profile-body {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    #studentProfileModal .profile-summary-bar,
+    #studentProfileModal .profile-add-section {
+        flex-shrink: 0;
+    }
+
+    /* El formulario de alta puede crecer más que el sheet: si pasa,
+       scrollea él (la lista de pagos queda plegada debajo) */
+    #studentProfileModal .profile-add-section {
+        overflow-y: auto;
+        max-height: 60dvh;
+    }
+
+    #studentProfileModal .profile-payments-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: calc(var(--spacing-md) + env(safe-area-inset-bottom));
+    }
+
+    /* Resumen en 2×2 en pantallas estrechas */
+    .profile-summary-bar {
+        flex-wrap: wrap;
+        gap: var(--spacing-md) var(--spacing-xl);
+    }
+
+    /* Botones de alta a lo ancho, al alcance del pulgar */
+    .profile-add-btns .btn {
+        flex: 1 1 0;
+        justify-content: center;
+    }
+
+    /* Filas de pago: la info ocupa su línea y las acciones caen debajo
+       alineadas a la derecha (antes 4 controles apretados en 360px) */
+    .payment-row {
+        flex-wrap: wrap;
+        row-gap: var(--spacing-xs);
+    }
+
+    .payment-row-info {
+        flex: 1 1 100%;
+    }
+
+    .payment-row-right {
+        margin-left: auto;
+    }
+
+    /* ---- CAJA --------------------------------------------------------- */
+
+    .caja-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--spacing-sm);
+    }
+
+    .caja-dates {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    /* Desde / Hasta lado a lado ocupando todo el ancho */
+    .caja-field {
+        flex: 1 1 40%;
+        min-width: 0;
+    }
+
+    .caja-field input {
+        width: 100%;
+        min-height: 44px;
+    }
+
+    /* Presets (Hoy/Ayer/Semana/Mes) como chips scrolleables horizontales
+       (patrón .recepcion-tabs) */
+    .caja-quick {
+        flex: 1 1 100%;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 2px;
+    }
+
+    .caja-quick .btn {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+
+    .caja-filters {
+        width: 100%;
+    }
+
+    .caja-filters select {
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 44px;
+    }
+
+    .caja-filters .btn {
+        flex: 1 1 100%;
+        justify-content: center;
+    }
+
+    .caja-reconcile-input input {
+        min-height: 44px;
+    }
+
+    /* La tabla de movimientos scrollea en su propia caja, nunca la página */
+    .caja-list {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .caja-table {
+        min-width: 640px;
+    }
+
+    /* ---- PARTIDOS ------------------------------------------------------ */
+
+    .matches-toolbar {
+        flex-wrap: wrap;
+        gap: var(--spacing-sm);
+    }
+
+    .matches-toolbar > .btn {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+
+    .cal-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .cal-nav {
+        width: 100%;
+    }
+
+    .cal-nav input[type="date"] {
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 44px;
+    }
+
+    .cal-nav .btn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    .cal-courts-config {
+        justify-content: space-between;
+    }
+
+    .cal-courts-config input {
+        min-height: 44px;
+    }
+
+    /* Sin arrastre en móvil (tap = abrir / crear, ver
+       attachCalendarInteractions): el dedo sobre un bloque vuelve a
+       scrollear la página con normalidad */
+    .cal-block {
+        touch-action: manipulation;
+        cursor: default;
+    }
+
+    .matches-calendar {
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* ---- CATEGORÍAS ----------------------------------------------------- */
+
+    .categorias-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--spacing-xs);
+    }
+
+    .categorias-filter-select {
+        width: 100%;
+        min-height: 44px;
+    }
+
+    /* ---- TORNEOS --------------------------------------------------------- */
+
+    .tournament-card-actions {
+        width: 100%;
+    }
+
+    .tournament-card-actions .btn {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+
+    /* El cuadro scrollea en horizontal dentro de su caja con inercia */
+    .t-bracket {
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* Pantallas estrechas (iPhone SE/mini): con la píldora "‹ Panel" visible la
+   barra fija del mes lleva 5 controles en una sola fila (flex sin wrap, nunca
+   se parte en dos líneas); compactar para que quepan sin apretarse */
+@media (max-width: 374px) {
+    .month-scroll-toolbar {
+        gap: 6px;
+    }
+
+    .month-top-actions {
+        gap: 6px;
+    }
+
+    .month-scroll-toolbar .day-icon-btn {
+        width: 40px;
+        height: 40px;
+    }
+
+    .month-scroll-toolbar .btn {
+        padding-left: var(--spacing-md);
+        padding-right: var(--spacing-md);
+    }
+
+    .month-scroll-toolbar .day-back-btn {
+        padding: 6px 10px 6px 6px;
+        font-size: var(--font-size-sm);
+    }
+}
