@@ -108,3 +108,43 @@ URL aleatoria en cada arranque).
 tener URL fija sin PC encendido. La app es 100% estática; `config.js` con la
 anon key de Supabase puede publicarse (la seguridad real es Auth + RLS).
 Tras publicar: "Añadir a pantalla de inicio" en los móviles de los monitores.
+
+**Nota de caché (importante al probar en móvil):** el navegador solo coge el
+código nuevo si recarga `index.html`. iOS/Safari cachea el propio index, así
+que se queda pidiendo el `app.js`/`styles.css` viejos aunque se haya subido el
+`?v=N`. Por eso el `<head>` del index lleva metas `Cache-Control: no-cache`.
+Para SALIR de un index ya cacheado (la primera vez), abrir la URL con un query
+nuevo: `?fresh=1`, `?fresh=2`… Señal de que se está en código nuevo: en
+Coordinador → Gestión de clase el buscador está arriba y la tabla scrollea en
+su propia caja de altura fija.
+
+---
+
+## 7. Carga de pagos de "Gestión de clase" (crecerá con el histórico)
+
+**Estado actual:** la pestaña **Gestión de clase** del coordinador
+(`renderGestionClase` en `app.js`) descarga **todos** los pagos de la tabla
+`student_payments` en una sola llamada lógica (`db.getAllPayments`, que pagina
+de 1000 en 1000 para superar el límite de Supabase) y los agrupa por alumno en
+memoria. Antes se hacía **una consulta por alumno** (N+1); eso ya se corrigió.
+
+**Qué NO es problema:** ni el filtrado del buscador (es en memoria, instantáneo
+con miles de alumnos) ni pintar la tabla (string HTML + scroll interno de altura
+fija). El coste no depende del nº de alumnos, sino del **nº total de pagos**.
+
+**Qué SÍ crecerá:** `getAllPayments` trae **todo el histórico** de pagos. Para un
+club normal (unos miles de registros al año) va sobrado; con decenas de miles
+acumulados en varios años, la descarga empezará a notarse al abrir la pestaña.
+
+**Síntoma que indica que ha llegado el momento:** "Cargando historial de
+pagos..." tarda varios segundos al entrar en Gestión de clase.
+
+**Solución prevista:** acotar la consulta a lo que de verdad importa para
+"al día / retraso" — los **últimos ~12 meses** — en lugar de traerlo todo.
+Cambio localizado en `db.getAllPayments` (`.gte('period', <YYYY-MM de hace 12
+meses>)` o por `paid_date`/`created_at`). Ojo: la columna "Última cuota pagada"
+podría no encontrar una cuota más antigua que el rango; si se quiere exacta,
+calcularla con una consulta agregada aparte. Mantener la conversión
+camelCase ↔ snake_case en `db.js` (regla del proyecto).
+
+**Esfuerzo estimado:** bajo (un solo punto a tocar).

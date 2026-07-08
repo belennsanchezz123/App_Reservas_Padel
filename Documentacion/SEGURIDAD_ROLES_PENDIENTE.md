@@ -213,10 +213,15 @@ activado el daño es limitado, pero conviene rotarla igualmente:
 
 ---
 
-## 5. Futuro: pagos de alumnos (`student_payments`)
+## 5. Pagos de alumnos (`student_payments`) — ✅ IMPLEMENTADO
 
-Cuando se añada el cobro a alumnos (distinto del pago a monitores que ya existe con
-`classes.paid`), crear la tabla con RLS desde el primer día:
+> **Estado (jul 2026):** la tabla `student_payments` ya existe y está en uso (cobro
+> a alumnos, distinto del pago a monitores que se marca con `classes.paid`). CRUD en
+> `db.js` (`getPaymentsByStudent`, `getAllPayments`, `createPayment`, `updatePayment`,
+> `convertPaymentFromDB`), UI en Recepción (pestaña Pagos) y en el panel del alumno.
+> El bloque de abajo es el diseño de referencia original.
+
+Diseño de referencia (crear la tabla con RLS desde el primer día):
 
 ```sql
 CREATE TABLE student_payments (
@@ -241,3 +246,42 @@ CREATE POLICY student_payments_all ON student_payments
 
 Recordatorio (CLAUDE.md): al crear esta tabla, añadir la conversión camelCase ↔ snake_case en
 `db.js` y documentar el modelo en `CLAUDE.md`.
+
+---
+
+## 6. Rol de alumno (`usuario`) — ✅ IMPLEMENTADO (jul 2026)
+
+El alumno tiene acceso propio a la app. **No** es un valor del array
+`monitors.permissions`: se deduce en el login (`resolveUserFromAuth` en `app.js`)
+cuando el usuario autenticado **no** tiene fila en `monitors` pero **sí** en
+`students` (enlazada por `students.auth_user_id`). Entonces
+`currentUser.permissions = ['usuario']` y se muestra el panel del alumno
+(`showStudentView` / `renderStudentDashboard`).
+
+**Migración:** `student_role.sql` (en la raíz del proyecto) añade
+`students.auth_user_id`, crea la tabla `student_recoveries` (clases por recuperar,
+que genera el monitor con `markAbsence`) y define funciones y políticas RLS para
+que el alumno solo lea SUS pagos/recuperaciones y las clases futuras no cerradas
+(para los avisos). El script es autocontenido (repite `current_monitor_id()` e
+`is_coordinator()` de `rls_security_por_rol.sql`).
+
+**Cómo dar acceso a un alumno:**
+1. Crear su usuario en **Authentication → Users** (email + contraseña).
+2. Enlazarlo: `UPDATE students SET auth_user_id = '<uuid>' WHERE id = '<student_id>';`
+
+**⚠️ Regla: una cuenta de Auth = un solo rol.** No enlaces el mismo usuario de Auth
+a la vez como personal (fila en `monitors`) y como alumno (`students.auth_user_id`),
+ni metas `'usuario'` en `monitors.permissions`. Si una cuenta acumula varios roles,
+`showMainApp` da **prioridad al personal** (coordinador → recepción → monitor →
+alumno), pero el dato queda ambiguo. Diagnóstico rápido:
+```sql
+-- ¿algún usuario es personal Y alumno a la vez?
+SELECT s.id, s.name FROM students s
+JOIN monitors m ON m.auth_user_id = s.auth_user_id;
+-- ¿algún monitor tiene 'usuario' colado en permisos?
+SELECT id, name, permissions FROM monitors WHERE 'usuario' = ANY(permissions);
+```
+
+**Bloqueo por impago:** al entrar, si el alumno tiene una cuota mensual sin pagar de
+un mes anterior (o del mes actual pasado el día 5), ve una pantalla de bloqueo en
+vez del panel (`findBlockingUnpaidQuota` en `app.js`).

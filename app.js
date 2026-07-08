@@ -24,6 +24,10 @@ const appState = {
     cajaCounted: '',
     matchesView: 'list',
     calendarDate: null,
+    coordTab: 'monitores',
+    avisosCollapsed: true,
+    gestionSearch: '',
+    gestionData: null,
 };
 
 const CONFIG = {
@@ -67,6 +71,43 @@ window.addEventListener('DOMContentLoaded', () => {
 // SIMPLE EMAIL/PASSWORD LOGIN OVERLAY (index.html #login-view)
 // ==========================================
 
+// Dado el id de usuario de Supabase Auth, devuelve el objeto currentUser
+// buscando primero en `monitors` (monitor/coordinador/recepción) y, si no
+// existe, en `students` (rol 'usuario'/alumno). Devuelve null si no hay perfil.
+async function resolveUserFromAuth(authUserId) {
+    try {
+        const { data: monitorRow } = await supabase
+            .from('monitors')
+            .select('*')
+            .eq('auth_user_id', authUserId)
+            .maybeSingle();
+
+        if (monitorRow) {
+            return {
+                id: monitorRow.id,
+                name: monitorRow.name,
+                permissions: monitorRow.permissions || [],
+            };
+        }
+
+        // ¿Es un alumno con acceso?
+        const studentRow = await db.getStudentByAuthId(authUserId);
+        if (studentRow) {
+            return {
+                id: studentRow.id,
+                studentId: studentRow.id,
+                name: studentRow.name,
+                permissions: ['usuario'],
+            };
+        }
+
+        return null;
+    } catch (e) {
+        console.error('Error resolviendo el perfil del usuario:', e);
+        return null;
+    }
+}
+
 // Esta función se llama desde el botón "Entrar" del nuevo login
 // que has añadido en index.html. Aquí conectamos de verdad con Supabase Auth
 // usando supabase-js v2 (UMD) para hacer signInWithPassword.
@@ -104,26 +145,18 @@ async function handleLogin() {
             return;
         }
 
-        // Fetch the monitor row linked to this auth user
-        const { data: monitorRow, error: monitorError } = await supabase
-            .from('monitors')
-            .select('*')
-            .eq('auth_user_id', data.user.id)
-            .single();
+        // Resolver el perfil (monitor/coordinador/recepción o alumno) del usuario.
+        const resolvedUser = await resolveUserFromAuth(data.user.id);
 
-        if (monitorError || !monitorRow) {
-            console.error('No se encontró fila en monitors para este usuario:', monitorError);
+        if (!resolvedUser) {
+            console.error('No se encontró perfil (monitors/students) para este usuario.');
             errorMsg.textContent = 'Usuario no autorizado. Contacta con el administrador.';
             errorMsg.style.display = 'block';
             await supabase.auth.signOut();
             return;
         }
 
-        appState.currentUser = {
-            id: monitorRow.id,
-            name: monitorRow.name,
-            permissions: monitorRow.permissions || [],
-        };
+        appState.currentUser = resolvedUser;
 
         const loginView = document.getElementById('login-view');
         if (loginView) loginView.style.display = 'none';
@@ -340,6 +373,10 @@ function isMonitor() {
 
 function isRecepcion() {
     return (appState.currentUser?.permissions || []).includes('recepcion');
+}
+
+function isUsuario() {
+    return (appState.currentUser?.permissions || []).includes('usuario');
 }
 
 // ==========================================
@@ -3623,11 +3660,15 @@ function showClassDetails(classId) {
     if (cls.students.length === 0) {
         studentsHtml += '<p style="color: var(--gray-500);">No hay alumnos en esta clase</p>';
     } else {
+        const canMarkAbsence = isMonitor() || isCoordinator();
         cls.students.forEach(studentId => {
             const student = getStudentById(studentId);
             if (student) {
                 const levelHtml = (student.level !== null && student.level !== undefined) ? `<span class="level-badge" style="margin-left:0.5rem">Nivel: ${student.level}</span>` : '';
-                studentsHtml += `<div class="student-item">${student.name}${levelHtml}</div>`;
+                const absenceBtn = canMarkAbsence
+                    ? `<button class="btn-icon-sm btn-absence" onclick="markAbsence('${cls.id}', '${studentId}')" title="Marcar ausencia (clase por recuperar)">🔁 Ausente</button>`
+                    : '';
+                studentsHtml += `<div class="student-item"><span>${escapeHtml(student.name)}${levelHtml}</span>${absenceBtn}</div>`;
             }
         });
     }
@@ -4161,6 +4202,30 @@ async function toggleClassCompleted(classId) {
     showToast(message, 'success');
 }
 
+// Marca a un alumno como ausente en una clase: crea una "clase por recuperar".
+// Solo monitores y coordinadores.
+async function markAbsence(classId, studentId) {
+    if (!(isMonitor() || isCoordinator())) return;
+    const cls = getClassById(classId);
+    const student = getStudentById(studentId);
+    if (!cls || !student) return;
+
+    if (!confirm(`¿Marcar a ${student.name} como ausente? Se le añadirá una clase por recuperar.`)) return;
+
+    try {
+        await db.createRecovery({
+            studentId,
+            originClassId: classId,
+            originDate: (cls.date || '').substring(0, 10),
+            notes: `Ausencia en clase del ${formatDate(cls.date)} ${cls.startTime}`,
+        });
+        showToast(`Ausencia registrada · ${student.name} tiene una clase por recuperar`, 'success');
+    } catch (e) {
+        console.error('Error registrando ausencia:', e);
+        showToast('No se pudo registrar la ausencia', 'error');
+    }
+}
+
 function updateToggleCompletedButton(cls) {
     const btn = document.getElementById('toggleCompletedBtn');
     if (!btn) return;
@@ -4202,10 +4267,16 @@ function showMainApp() {
     updateHeaderForUser();
     fetchWeather();
 
+    // Los roles de personal (coordinador, recepción, monitor) tienen prioridad.
+    // La vista de alumno solo se muestra a cuentas que sean ÚNICAMENTE 'usuario'.
     if (isCoordinator()) {
         showCoordinatorDashboard();
     } else if (isRecepcion()) {
         showRecepcionView();
+    } else if (isMonitor()) {
+        showMonitorView();
+    } else if (isUsuario()) {
+        showStudentView();
     } else {
         showMonitorView();
     }
@@ -4226,6 +4297,7 @@ function updateHeaderForUser() {
         let roleEmoji = '🎾';
         if (isCoordinator()) roleEmoji = '👔';
         else if (isRecepcion()) roleEmoji = '🏢';
+        else if (isUsuario()) roleEmoji = '🎾';
         userDisplay.innerHTML = `${roleEmoji} ${currentUser.name}`;
     }
 }
@@ -4234,26 +4306,182 @@ function showCoordinatorDashboard() {
     const calendarSection = document.getElementById('calendarSectionContainer');
     const coordinatorDashboard = document.getElementById('coordinatorDashboard');
     const recepcionDashboard = document.getElementById('recepcionDashboard');
+    const studentDashboard = document.getElementById('studentDashboard');
     const sidebar = document.getElementById('sidebar');
 
     if (calendarSection) calendarSection.style.display = 'none';
     if (recepcionDashboard) recepcionDashboard.style.display = 'none';
+    if (studentDashboard) studentDashboard.style.display = 'none';
     if (coordinatorDashboard) {
         coordinatorDashboard.style.display = 'block';
-        renderMonitorsList();
+        switchCoordTab(appState.coordTab || 'monitores');
     }
     if (sidebar) sidebar.style.display = 'none';
+}
+
+// Alterna entre las pestañas del panel de coordinador: "Monitores" y
+// "Gestión de clase" (historial de pagos y retrasos de alumnos).
+function switchCoordTab(tab) {
+    appState.coordTab = tab;
+
+    const monitoresView = document.getElementById('coordMonitoresView');
+    const gestionView = document.getElementById('coordGestionClaseView');
+    const tabMonitores = document.getElementById('coordTabMonitores');
+    const tabGestion = document.getElementById('coordTabGestion');
+
+    if (monitoresView) monitoresView.style.display = tab === 'monitores' ? '' : 'none';
+    if (gestionView) gestionView.style.display = tab === 'gestion' ? '' : 'none';
+    if (tabMonitores) tabMonitores.classList.toggle('active', tab === 'monitores');
+    if (tabGestion) tabGestion.classList.toggle('active', tab === 'gestion');
+
+    if (tab === 'monitores') renderMonitorsList();
+    else if (tab === 'gestion') renderGestionClase();
+}
+
+// Tabla de "Gestión de clase": por cada alumno, su estado de pago del mes
+// actual, cuotas pendientes, clases por recuperar y si está "con retraso"
+// (impago vencido, misma regla que bloquea la sesión del alumno).
+async function renderGestionClase() {
+    const container = document.getElementById('coordGestionClaseContent');
+    if (!container) return;
+
+    container.innerHTML = '<p class="profile-loading">Cargando historial de pagos...</p>';
+
+    const students = appState.students.filter(s => s.active !== false);
+
+    // Cargar TODOS los pagos y recuperaciones pendientes en 2 consultas
+    // (no una por alumno): escala aunque el club tenga miles de alumnos.
+    let allPayments = {};
+    let pendingRecoveries = [];
+    try {
+        const [paymentRows, recData] = await Promise.all([
+            db.getAllPayments().catch(() => []),
+            db.getPendingRecoveries().catch(() => []),
+        ]);
+        // Agrupar los pagos por alumno en memoria.
+        paymentRows.forEach(row => {
+            const p = db.convertPaymentFromDB(row);
+            (allPayments[p.studentId] = allPayments[p.studentId] || []).push(p);
+        });
+        pendingRecoveries = recData.map(r => db.convertRecoveryFromDB(r));
+    } catch (e) {
+        console.error('Error cargando gestión de clase:', e);
+    }
+
+    const recoveryCountByStudent = {};
+    pendingRecoveries.forEach(r => {
+        recoveryCountByStudent[r.studentId] = (recoveryCountByStudent[r.studentId] || 0) + 1;
+    });
+
+    // Cachear los datos para poder filtrar por nombre sin volver a consultar.
+    appState.gestionData = { students, allPayments, recoveryCountByStudent };
+    renderGestionClaseTable();
+}
+
+// Pinta el armazón de la tabla (resumen + buscador + cabecera) UNA sola vez.
+// Al escribir en el buscador solo se actualizan las filas (updateGestionRows),
+// sin re-renderizar el input: así no pierde el foco ni salta la pantalla
+// con el teclado en móvil (iOS/Android).
+function renderGestionClaseTable() {
+    const container = document.getElementById('coordGestionClaseContent');
+    if (!container || !appState.gestionData) return;
+
+    const { students, allPayments } = appState.gestionData;
+    const currentPeriodLabel = formatPeriod(periodOf());
+    const lateCount = students.filter(s => findBlockingUnpaidQuota(allPayments[s.id] || [])).length;
+
+    container.innerHTML = `
+        <div class="gestion-controls">
+            <div class="gestion-search-wrap">
+                <span class="gestion-search-icon">🔍</span>
+                <input type="search" id="gestionSearch" class="gestion-search-input"
+                    placeholder="Buscar alumno..." value="${escapeHtml(appState.gestionSearch || '')}"
+                    autocomplete="off" autocorrect="off" spellcheck="false"
+                    oninput="onGestionSearchInput(this.value)">
+            </div>
+            <div class="gestion-summary">
+                <span>Mes actual: <strong>${escapeHtml(currentPeriodLabel)}</strong></span>
+                <span>Alumnos: <strong>${students.length}</strong></span>
+                <span class="${lateCount ? 'is-late' : ''}">Con retraso: <strong>${lateCount}</strong></span>
+            </div>
+        </div>
+        <div class="gestion-table-wrap">
+            <table class="gestion-table">
+                <thead>
+                    <tr>
+                        <th>Alumno</th>
+                        <th>Última cuota pagada</th>
+                        <th>Cuotas pendientes</th>
+                        <th>Por recuperar</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody id="gestionTableBody"></tbody>
+            </table>
+        </div>
+    `;
+
+    updateGestionRows();
+}
+
+// Actualiza SOLO las filas de la tabla según el filtro (no toca el buscador).
+function updateGestionRows() {
+    const tbody = document.getElementById('gestionTableBody');
+    if (!tbody || !appState.gestionData) return;
+
+    const { students, allPayments, recoveryCountByStudent } = appState.gestionData;
+    const query = (appState.gestionSearch || '').toLowerCase().trim();
+    const filtered = query
+        ? students.filter(s => s.name.toLowerCase().includes(query))
+        : students;
+
+    const rows = filtered.map(s => {
+        const payments = allPayments[s.id] || [];
+        const lastPaid = payments
+            .filter(p => p.paidDate && p.period)
+            .sort((a, b) => (b.period || '').localeCompare(a.period || ''))[0];
+        const pending = payments.filter(p => !p.paidDate);
+        const blocking = findBlockingUnpaidQuota(payments);
+        const recoveries = recoveryCountByStudent[s.id] || 0;
+
+        const statusHtml = blocking
+            ? `<span class="badge-late">⚠️ Retraso (${escapeHtml(formatPeriod(blocking.period))})</span>`
+            : `<span class="badge-ok">Al día</span>`;
+
+        return `
+            <tr class="${blocking ? 'row-late' : ''}">
+                <td>${escapeHtml(s.name)}</td>
+                <td>${lastPaid ? escapeHtml(formatPeriod(lastPaid.period)) : '—'}</td>
+                <td class="num">${pending.length}</td>
+                <td class="num">${recoveries}</td>
+                <td>${statusHtml}</td>
+            </tr>`;
+    }).join('');
+
+    const emptyRow = query
+        ? `<tr><td colspan="5">Ningún alumno coincide con "${escapeHtml(query)}".</td></tr>`
+        : '<tr><td colspan="5">No hay alumnos.</td></tr>';
+
+    tbody.innerHTML = rows || emptyRow;
+}
+
+// Actualiza el filtro del buscador de "Gestión de clase" y refresca las filas.
+function onGestionSearchInput(value) {
+    appState.gestionSearch = value;
+    updateGestionRows();
 }
 
 function showMonitorView() {
     const calendarSection = document.getElementById('calendarSectionContainer');
     const coordinatorDashboard = document.getElementById('coordinatorDashboard');
     const recepcionDashboard = document.getElementById('recepcionDashboard');
+    const studentDashboard = document.getElementById('studentDashboard');
     const sidebar = document.getElementById('sidebar');
 
     if (calendarSection) calendarSection.style.display = 'block';
     if (coordinatorDashboard) coordinatorDashboard.style.display = 'none';
     if (recepcionDashboard) recepcionDashboard.style.display = 'none';
+    if (studentDashboard) studentDashboard.style.display = 'none';
     if (sidebar) sidebar.style.display = 'block';
 
     renderCalendar();
@@ -4264,14 +4492,270 @@ function showRecepcionView() {
     const calendarSection = document.getElementById('calendarSectionContainer');
     const coordinatorDashboard = document.getElementById('coordinatorDashboard');
     const recepcionDashboard = document.getElementById('recepcionDashboard');
+    const studentDashboard = document.getElementById('studentDashboard');
     const sidebar = document.getElementById('sidebar');
 
     if (calendarSection) calendarSection.style.display = 'none';
     if (coordinatorDashboard) coordinatorDashboard.style.display = 'none';
     if (recepcionDashboard) recepcionDashboard.style.display = 'block';
+    if (studentDashboard) studentDashboard.style.display = 'none';
     if (sidebar) sidebar.style.display = 'none';
 
     switchRecepcionTab(appState.recepcionTab || 'pagos');
+}
+
+// ==========================================
+// PANEL DEL ALUMNO (rol 'usuario')
+// ==========================================
+
+function showStudentView() {
+    const calendarSection = document.getElementById('calendarSectionContainer');
+    const coordinatorDashboard = document.getElementById('coordinatorDashboard');
+    const recepcionDashboard = document.getElementById('recepcionDashboard');
+    const studentDashboard = document.getElementById('studentDashboard');
+    const sidebar = document.getElementById('sidebar');
+
+    if (calendarSection) calendarSection.style.display = 'none';
+    if (coordinatorDashboard) coordinatorDashboard.style.display = 'none';
+    if (recepcionDashboard) recepcionDashboard.style.display = 'none';
+    if (studentDashboard) studentDashboard.style.display = 'block';
+    if (sidebar) sidebar.style.display = 'none';
+
+    renderStudentDashboard();
+}
+
+// Periodo 'YYYY-MM' de una fecha (por defecto, hoy).
+function periodOf(date = new Date()) {
+    const d = new Date(date);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// TRUE si el alumno tiene un impago que debe bloquear su sesión:
+// existe una cuota mensual (period fijado, sin clase asociada) sin pagar cuyo
+// periodo es anterior al mes actual, o es el mes actual pero ya pasó el día 5.
+// Devuelve la primera cuota pendiente que bloquea, o null si está al día.
+function findBlockingUnpaidQuota(payments) {
+    const currentPeriod = periodOf();
+    const today = new Date();
+    const pastDay5 = today.getDate() > 5;
+
+    const pending = (payments || []).filter(p =>
+        p.period && !p.classId && !p.paidDate && p.period <= currentPeriod
+    );
+    // Impaga y vencida: cualquier mes anterior, o el mes actual si ya pasó el día 5.
+    const blocking = pending.filter(p => p.period < currentPeriod || (p.period === currentPeriod && pastDay5));
+    if (blocking.length === 0) return null;
+    // La más antigua primero.
+    blocking.sort((a, b) => a.period.localeCompare(b.period));
+    return blocking[0];
+}
+
+// Nivel medio de los alumnos inscritos en una clase (o null si no hay niveles).
+function avgLevelOfClass(cls) {
+    const levels = (cls.students || [])
+        .map(id => getStudentById(id))
+        .filter(s => s && s.level !== null && s.level !== undefined)
+        .map(s => Number(s.level));
+    if (levels.length === 0) return null;
+    return levels.reduce((a, b) => a + b, 0) / levels.length;
+}
+
+// Clases libres futuras que "cuadran" con el nivel del alumno:
+// no cerradas, con 1-3 alumnos (sin llegar a la capacidad), el alumno no
+// inscrito, y su nivel dentro de ±0,5 del nivel medio de los inscritos.
+function findFreeClassesForStudent(student) {
+    if (!student) return [];
+    const todayStr = new Date().toLocaleDateString('sv');
+    const level = (student.level !== null && student.level !== undefined) ? Number(student.level) : null;
+
+    return appState.classes.filter(cls => {
+        if (!cls || cls.isCompleted) return false;
+        const dateStr = (cls.date || '').substring(0, 10);
+        if (dateStr < todayStr) return false;
+        const count = (cls.students || []).length;
+        if (count < 1 || count >= (cls.maxCapacity || 4)) return false;
+        if (cls.students.includes(student.id)) return false;
+        if (level === null) return false;
+        const avg = avgLevelOfClass(cls);
+        if (avg === null) return false;
+        return Math.abs(level - avg) <= 0.5;
+    }).sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.startTime || '').localeCompare(b.startTime || ''));
+}
+
+// Estado "visto" de avisos por alumno (persistido en localStorage, sin push).
+function seenFreeClassesKey(studentId) {
+    return `padel_seen_free_${studentId}`;
+}
+function getSeenFreeClasses(studentId) {
+    try {
+        return JSON.parse(localStorage.getItem(seenFreeClassesKey(studentId)) || '[]');
+    } catch (e) { return []; }
+}
+function markFreeClassesSeen(studentId, classIds) {
+    localStorage.setItem(seenFreeClassesKey(studentId), JSON.stringify(classIds));
+    renderStudentDashboard();
+}
+
+// Colapsa/expande la sección de Avisos del panel del alumno (sin re-render).
+function toggleAvisos() {
+    appState.avisosCollapsed = !appState.avisosCollapsed;
+    const section = document.getElementById('avisosSection');
+    if (section) section.classList.toggle('collapsed', appState.avisosCollapsed);
+}
+
+async function renderStudentDashboard() {
+    const container = document.getElementById('studentDashboardContent');
+    if (!container) return;
+
+    const user = getCurrentUser();
+    const studentId = user?.studentId || user?.id;
+    const student = getStudentById(studentId);
+
+    container.innerHTML = '<p class="profile-loading">Cargando tu información...</p>';
+
+    // Cargar pagos y recuperaciones del alumno.
+    let payments = [];
+    let recoveries = [];
+    try {
+        const [pData, rData] = await Promise.all([
+            db.getPaymentsByStudent(studentId),
+            db.getRecoveriesByStudent(studentId).catch(() => []),
+        ]);
+        payments = pData.map(p => db.convertPaymentFromDB(p));
+        recoveries = rData.map(r => db.convertRecoveryFromDB(r));
+    } catch (e) {
+        console.error('Error cargando datos del alumno:', e);
+    }
+
+    // 1) Bloqueo por impago (tiene prioridad sobre todo lo demás).
+    const blockingQuota = findBlockingUnpaidQuota(payments);
+    if (blockingQuota) {
+        container.innerHTML = `
+            <div class="student-blocked">
+                <div class="student-blocked-icon">🔒</div>
+                <h2>Sesión bloqueada por impago</h2>
+                <p>Tienes una cuota pendiente de <strong>${formatPeriod(blockingQuota.period)}</strong>${blockingQuota.amount != null ? ` (€${blockingQuota.amount.toFixed(2)})` : ''}.</p>
+                <p>Para poder acceder a tu panel, ponte en contacto con recepción para regularizar el pago. Una vez registrado, tu acceso se restablecerá automáticamente.</p>
+                <button class="btn btn-secondary" onclick="logout()">Cerrar sesión</button>
+            </div>
+        `;
+        return;
+    }
+
+    // 2) Cuotas / pagos.
+    const paidPayments = payments.filter(p => p.paidDate);
+    const pendingPayments = payments.filter(p => !p.paidDate);
+    const totalPaid = paidPayments.reduce((s, p) => s + (p.amount || 0), 0);
+
+    const paymentsHtml = payments.length === 0
+        ? '<p class="student-empty">Aún no hay cuotas registradas.</p>'
+        : payments.map(p => {
+            const isPaid = !!p.paidDate;
+            const desc = p.period ? `Cuota ${formatPeriod(p.period)}` : (p.classId ? 'Clase suelta' : 'Pago');
+            const amount = p.amount != null ? `€${p.amount.toFixed(2)}` : '';
+            const method = p.method ? `<span class="payment-method">${escapeHtml(p.method)}</span>` : '';
+            const status = isPaid
+                ? `<span class="pay-badge paid">Pagado ${escapeHtml(p.paidDate)}</span>`
+                : `<span class="pay-badge none">Pendiente</span>`;
+            return `
+                <div class="payment-row">
+                    <div class="payment-row-info">
+                        <div class="payment-desc"><strong>${escapeHtml(desc)}</strong> ${method}</div>
+                    </div>
+                    <div class="payment-row-right">
+                        <span class="payment-amount">${amount}</span>
+                        ${status}
+                    </div>
+                </div>`;
+        }).join('');
+
+    // 3) Clases por recuperar (pendientes = sin recovered_at).
+    const pendingRecoveries = recoveries.filter(r => !r.recoveredAt);
+    const recoveriesHtml = pendingRecoveries.length === 0
+        ? '<p class="student-empty">No tienes clases pendientes de recuperar.</p>'
+        : pendingRecoveries.map(r => {
+            const cls = r.originClassId ? getClassById(r.originClassId) : null;
+            const dateLabel = r.originDate ? formatDate(r.originDate) : (cls ? formatDate(cls.date) : '');
+            const timeLabel = cls ? ` · ${cls.startTime}` : '';
+            return `
+                <div class="recovery-row">
+                    <span class="recovery-icon">🔁</span>
+                    <div>
+                        <div class="recovery-title">Clase del ${escapeHtml(dateLabel)}${timeLabel}</div>
+                        ${r.notes ? `<div class="recovery-notes">${escapeHtml(r.notes)}</div>` : ''}
+                    </div>
+                </div>`;
+        }).join('');
+
+    // 4) Avisos: clases libres que cuadran con su nivel.
+    const freeClasses = findFreeClassesForStudent(student);
+    const freeIds = freeClasses.map(c => c.id);
+    const seen = getSeenFreeClasses(studentId);
+    const unseenCount = freeIds.filter(id => !seen.includes(id)).length;
+
+    const freeHtml = freeClasses.length === 0
+        ? '<p class="student-empty">No hay clases libres para tu nivel ahora mismo.</p>'
+        : freeClasses.map(cls => {
+            const isNew = !seen.includes(cls.id);
+            const avg = avgLevelOfClass(cls);
+            const monitor = cls.monitorName ? ` · ${escapeHtml(cls.monitorName)}` : '';
+            return `
+                <div class="notice-row ${isNew ? 'notice-new' : ''}">
+                    <span class="notice-icon">🎾</span>
+                    <div class="notice-body">
+                        <div class="notice-title">${escapeHtml(formatDate(cls.date))} · ${escapeHtml(cls.startTime)}-${escapeHtml(cls.endTime)}${monitor}</div>
+                        <div class="notice-sub">${cls.students.length}/${cls.maxCapacity} plazas · nivel medio ${avg != null ? avg.toFixed(1) : '—'}</div>
+                    </div>
+                    ${isNew ? '<span class="notice-badge">Nuevo</span>' : ''}
+                </div>`;
+        }).join('');
+
+    const markSeenBtn = unseenCount > 0
+        ? `<button class="btn btn-sm btn-secondary" onclick='markFreeClassesSeen(${JSON.stringify(studentId)}, ${JSON.stringify(freeIds)})'>Marcar como leídos</button>`
+        : '';
+
+    container.innerHTML = `
+        <div class="student-greeting">
+            <h2>Hola, ${escapeHtml(student ? student.name : 'alumno')} 👋</h2>
+            <p class="student-sub">Nivel ${student && student.level != null ? student.level : '—'}</p>
+        </div>
+
+        <div class="student-cards">
+            <div class="student-card student-card-stat">
+                <span class="student-stat-label">Total pagado</span>
+                <span class="student-stat-value">€${totalPaid.toFixed(2)}</span>
+            </div>
+            <div class="student-card student-card-stat">
+                <span class="student-stat-label">Cuotas pendientes</span>
+                <span class="student-stat-value ${pendingPayments.length ? 'is-warn' : ''}">${pendingPayments.length}</span>
+            </div>
+            <div class="student-card student-card-stat">
+                <span class="student-stat-label">Por recuperar</span>
+                <span class="student-stat-value ${pendingRecoveries.length ? 'is-warn' : ''}">${pendingRecoveries.length}</span>
+            </div>
+        </div>
+
+        <div class="student-section ${appState.avisosCollapsed ? 'collapsed' : ''}" id="avisosSection">
+            <div class="student-section-head student-section-toggle" onclick="toggleAvisos()">
+                <h3>🔔 Avisos ${freeClasses.length > 0 ? `<span class="notice-count">${unseenCount > 0 ? unseenCount : freeClasses.length}</span>` : ''}</h3>
+                <span class="section-chevron" aria-hidden="true"></span>
+            </div>
+            <div class="student-section-body">
+                ${markSeenBtn ? `<div class="avisos-actions">${markSeenBtn}</div>` : ''}
+                ${freeHtml}
+            </div>
+        </div>
+
+        <div class="student-section">
+            <div class="student-section-head"><h3>💳 Mis cuotas</h3></div>
+            <div class="student-section-body">${paymentsHtml}</div>
+        </div>
+
+        <div class="student-section">
+            <div class="student-section-head"><h3>🔁 Clases por recuperar</h3></div>
+            <div class="student-section-body">${recoveriesHtml}</div>
+        </div>
+    `;
 }
 
 function renderRecepcionStudentsList() {
@@ -5954,15 +6438,11 @@ async function initializeApp() {
                     return;
                 }
 
-                // Fetch monitor row to get name and permissions
-                const { data: monitorRow, error: monitorError } = await supabase
-                    .from('monitors')
-                    .select('*')
-                    .eq('auth_user_id', data.session.user.id)
-                    .single();
+                // Resolver el perfil (monitor/coordinador/recepción o alumno).
+                const resolvedUser = await resolveUserFromAuth(data.session.user.id);
 
-                if (monitorError || !monitorRow) {
-                    console.warn('Usuario sin fila en monitors, cerrando sesión.');
+                if (!resolvedUser) {
+                    console.warn('Usuario sin perfil (monitors/students), cerrando sesión.');
                     await supabase.auth.signOut().catch(() => {});
                     if (loginView) loginView.style.display = 'flex';
                     hideMainApp();
@@ -5970,11 +6450,7 @@ async function initializeApp() {
                     return;
                 }
 
-                appState.currentUser = {
-                    id: monitorRow.id,
-                    name: monitorRow.name,
-                    permissions: monitorRow.permissions || [],
-                };
+                appState.currentUser = resolvedUser;
 
                 if (loginView) loginView.style.display = 'none';
             } catch (sessionError) {

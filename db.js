@@ -129,18 +129,38 @@ const db = {
         }
     },
 
-    async createStudent(student) {
+    // Devuelve el alumno vinculado a un usuario de Supabase Auth (o null).
+    // Se usa en el login para deducir el rol 'usuario'.
+    async getStudentByAuthId(authUserId) {
         try {
             const { data, error } = await supabase
                 .from('students')
-                .upsert([{
-                    id: student.id,
-                    name: student.name,
-                    email: student.email,
-                    phone: student.phone,
-                    level: student.level,
-                    registered_date: student.registeredDate || new Date().toISOString()
-                }], { onConflict: 'id' })
+                .select('*')
+                .eq('auth_user_id', authUserId)
+                .maybeSingle();
+
+            if (error) throw error;
+            return data || null;
+        } catch (error) {
+            console.error('Error getting student by auth id:', error);
+            return null;
+        }
+    },
+
+    async createStudent(student) {
+        try {
+            const row = {
+                id: student.id,
+                name: student.name,
+                email: student.email,
+                phone: student.phone,
+                level: student.level,
+                registered_date: student.registeredDate || new Date().toISOString()
+            };
+            if (student.authUserId !== undefined) row.auth_user_id = student.authUserId || null;
+            const { data, error } = await supabase
+                .from('students')
+                .upsert([row], { onConflict: 'id' })
                 .select()
                 .single();
 
@@ -436,6 +456,7 @@ const db = {
             level: dbStudent.level,
             registeredDate: dbStudent.registered_date,
             active: dbStudent.active !== false,
+            authUserId: dbStudent.auth_user_id || null,
         };
     },
 
@@ -481,6 +502,34 @@ const db = {
             return data || [];
         } catch (error) {
             console.error('Error getting student payments:', error);
+            throw error;
+        }
+    },
+
+    // Todos los pagos de todos los alumnos, en una sola llamada lógica.
+    // Pagina de 1000 en 1000 para superar el límite por defecto de Supabase,
+    // de modo que escala aunque haya muchísimos pagos. La usa "Gestión de clase".
+    async getAllPayments() {
+        try {
+            const pageSize = 1000;
+            let from = 0;
+            let all = [];
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+                const { data, error } = await supabase
+                    .from('student_payments')
+                    .select('*')
+                    .order('created_at', { ascending: false })
+                    .range(from, from + pageSize - 1);
+                if (error) throw error;
+                if (!data || data.length === 0) break;
+                all = all.concat(data);
+                if (data.length < pageSize) break;
+                from += pageSize;
+            }
+            return all;
+        } catch (error) {
+            console.error('Error getting all payments:', error);
             throw error;
         }
     },
@@ -574,6 +623,108 @@ const db = {
             method: p.method || null,
             notes: p.notes || null,
             createdAt: p.created_at,
+        };
+    },
+
+    // ==========================================
+    // STUDENT RECOVERIES (clases por recuperar)
+    // ==========================================
+
+    async getRecoveriesByStudent(studentId) {
+        try {
+            const { data, error } = await supabase
+                .from('student_recoveries')
+                .select('*')
+                .eq('student_id', studentId)
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting student recoveries:', error);
+            throw error;
+        }
+    },
+
+    // Todas las recuperaciones pendientes (recovered_at nulo) del club.
+    // La usa el coordinador en "Gestión de clase".
+    async getPendingRecoveries() {
+        try {
+            const { data, error } = await supabase
+                .from('student_recoveries')
+                .select('*')
+                .is('recovered_at', null);
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting pending recoveries:', error);
+            throw error;
+        }
+    },
+
+    async createRecovery(recovery) {
+        try {
+            const { data, error } = await supabase
+                .from('student_recoveries')
+                .insert([{
+                    student_id: recovery.studentId,
+                    origin_class_id: recovery.originClassId || null,
+                    origin_date: recovery.originDate || null,
+                    notes: recovery.notes || null,
+                }])
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error creating recovery:', error);
+            throw error;
+        }
+    },
+
+    async markRecovered(id, recoveredClassId) {
+        try {
+            const { data, error } = await supabase
+                .from('student_recoveries')
+                .update({
+                    recovered_at: new Date().toISOString(),
+                    recovered_class_id: recoveredClassId || null,
+                })
+                .eq('id', id)
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error marking recovery as recovered:', error);
+            throw error;
+        }
+    },
+
+    async deleteRecovery(id) {
+        try {
+            const { error } = await supabase
+                .from('student_recoveries')
+                .delete()
+                .eq('id', id);
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error deleting recovery:', error);
+            throw error;
+        }
+    },
+
+    convertRecoveryFromDB(r) {
+        if (!r) return null;
+        return {
+            id: r.id,
+            studentId: r.student_id,
+            originClassId: r.origin_class_id || null,
+            originDate: r.origin_date || null,
+            recoveredAt: r.recovered_at || null,
+            recoveredClassId: r.recovered_class_id || null,
+            notes: r.notes || null,
+            createdAt: r.created_at,
         };
     },
 

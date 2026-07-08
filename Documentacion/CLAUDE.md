@@ -18,11 +18,14 @@ Browser (HTML + CSS + JS vanilla)
         Supabase (PostgreSQL + Auth email/contraseña)
 ```
 
-Los scripts se cargan en orden estricto en `index.html`:
+Los scripts se cargan en orden estricto en `index.html`, cada uno con `?v=N`
+para romper la caché (subir N al editar el archivo — ver también la nota de
+caché de iOS en `MANTENIMIENTO.md`):
 1. Supabase CDN
 2. `supabase-init.js`
 3. `db.js`
 4. `app.js`
+5. `tournaments.js`
 
 ## Comandos de desarrollo
 
@@ -43,7 +46,19 @@ App_Reservas_Padel/
 ├── db.js               # Capa de datos (CRUD sobre Supabase)
 ├── config.js           # Credenciales y cliente Supabase
 ├── supabase-init.js    # Script de inicialización adicional
-└── CLAUDE.md           # Este archivo
+├── tournaments.js      # Motor + UI de torneos (se carga tras app.js)
+├── styles.css          # Estilos (todos)
+├── schema.sql          # Esquema base de las tablas
+├── rls_security.sql    # RLS paso 1 (acceso total a autenticados)
+├── rls_security_por_rol.sql # RLS paso 2 (políticas por rol)
+├── student_role.sql    # Rol alumno: auth_user_id, student_recoveries, RLS
+├── matches.sql / tournaments.sql / seed_students.sql
+└── Documentacion/      # Toda la documentación .md
+    ├── CLAUDE.md               # Este archivo
+    ├── MANTENIMIENTO.md        # Deuda técnica y mejoras aplazadas
+    ├── SEGURIDAD_ROLES_PENDIENTE.md
+    ├── SETUP_SUPABASE.md / README_SUPABASE.md / PASOS_FINALES.md
+    └── PROMPT_COORDINADOR_MOVIL.md
 ```
 
 ## Modelos de datos
@@ -67,6 +82,34 @@ App_Reservas_Padel/
 | phone | text |
 | level | int (0–5) |
 | registered_date | date |
+| active | boolean |
+| auth_user_id | uuid (enlace a `auth.users`; da acceso de alumno) |
+
+### student_payments (cobros a alumnos)
+| Campo | Tipo |
+|---|---|
+| id | uuid |
+| student_id | uuid → students |
+| class_id | uuid → classes (null si es cuota mensual) |
+| period | text ('YYYY-MM', para cuotas mensuales) |
+| amount | numeric |
+| paid_date | date (null = pendiente) |
+| method | text (efectivo / bizum / transferencia) |
+| notes | text |
+
+### student_recoveries (clases por recuperar)
+| Campo | Tipo |
+|---|---|
+| id | uuid |
+| student_id | text → students |
+| origin_class_id | text → classes |
+| origin_date | date |
+| recovered_at | timestamptz (null = pendiente de recuperar) |
+| recovered_class_id | text |
+| notes | text |
+| created_at | timestamptz |
+
+Migración SQL en `student_role.sql` (añade `students.auth_user_id`, crea `student_recoveries` y políticas RLS por rol para el alumno).
 
 ### classes
 | Campo | Tipo |
@@ -116,8 +159,16 @@ Motor (`tournaments.js`): `computeGroupPlan(n, format)` calcula grupos/clasifica
 
 ## Roles de usuario
 
-- **Coordinador**: ve todos los monitores y sus clases, puede exportar a Excel.
-- **Monitor**: gestiona únicamente sus propias clases y alumnos.
+Los permisos viven en el array `monitors.permissions` (`coordinador` / `monitor` / `recepcion`). El rol `usuario` (alumno) **no** está en `monitors`: se deduce en el login (`resolveUserFromAuth` en `app.js`) cuando el usuario autenticado no tiene fila en `monitors` pero sí en `students` (por `students.auth_user_id`).
+
+- **Coordinador**: ve todos los monitores y sus clases, puede exportar a Excel. Su panel tiene dos pestañas: "Monitores" y "Gestión de clase" (historial de pagos de alumnos y retrasos), ver `switchCoordTab`/`renderGestionClase`.
+- **Monitor**: gestiona únicamente sus propias clases y alumnos. Desde el detalle de una clase puede "marcar ausencia" de un alumno (`markAbsence`), que genera una clase por recuperar.
+- **Recepción**: gestión de pagos, caja, partidos, categorías y torneos.
+- **Usuario (alumno)**: `permissions: ['usuario']`, `currentUser.studentId` = `students.id`. Panel propio (`showStudentView`/`renderStudentDashboard`) con:
+  - Cuotas pagadas y pendientes (tabla `student_payments`).
+  - Clases por recuperar (tabla `student_recoveries`, filas con `recovered_at` nulo).
+  - Avisos de clases libres que "cuadran" con su nivel: clases futuras, no cerradas (`is_completed=false`), con 1–3 alumnos (sin llegar a `max_capacity`) y con el nivel del alumno dentro de ±0,5 del nivel medio de los inscritos (`findFreeClassesForStudent`). El estado "visto" se guarda en `localStorage`.
+  - **Bloqueo por impago**: si hay una cuota mensual (`period`, sin `class_id`) sin pagar de un mes anterior, o del mes actual pasado el día 5, se muestra una pantalla de bloqueo en vez del panel (`findBlockingUnpaidQuota`).
 
 ## Funcionalidades principales
 

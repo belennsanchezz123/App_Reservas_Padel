@@ -4,9 +4,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- No cachear el HTML: así al subir ?v= de app.js/styles.css el navegador
+         siempre coge la versión nueva (evita quedarse con código viejo en iOS). -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Agridulce Padel Club</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=68">
+    <link rel="stylesheet" href="styles.css?v=75">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -34,7 +39,7 @@
             <button type="submit" class="auth-submit">Iniciar sesión</button>
             <p id="error-msg" class="auth-error"></p>
         </form>
-        <p class="auth-footer">Acceso restringido a monitores y coordinación</p>
+        <p class="auth-footer">Acceso para monitores, coordinación y alumnos</p>
     </div>
 </div>
 
@@ -82,8 +87,23 @@
                     </button>
                 </div>
             </div>
-<div class="monitors-grid" id="monitorsList">
-                <!-- Monitors will be injected here -->
+
+            <!-- Pestañas: Monitores / Gestión de clase -->
+            <div class="recepcion-tabs" role="tablist">
+                <button class="recepcion-tab active" id="coordTabMonitores" role="tab" onclick="switchCoordTab('monitores')">👥 Monitores</button>
+                <button class="recepcion-tab" id="coordTabGestion" role="tab" onclick="switchCoordTab('gestion')">📋 Gestión de clase</button>
+            </div>
+
+            <!-- Vista Monitores -->
+            <div id="coordMonitoresView">
+                <div class="monitors-grid" id="monitorsList">
+                    <!-- Monitors will be injected here -->
+                </div>
+            </div>
+
+            <!-- Vista Gestión de clase (historial de pagos y retrasos de alumnos) -->
+            <div id="coordGestionClaseView" style="display:none;">
+                <div id="coordGestionClaseContent"></div>
             </div>
         </section>
 
@@ -225,6 +245,11 @@
                     <div id="tournamentDetailView" style="display:none;"></div>
                 </div>
             </div>
+        </section>
+
+        <!-- Student Dashboard (rol 'usuario' / alumno) -->
+        <section id="studentDashboard" class="student-dashboard" style="display: none;">
+            <div id="studentDashboardContent"></div>
         </section>
 
         <!-- Sidebar -->
@@ -899,9 +924,9 @@
     <!-- 2. Then initialize Supabase client with detailed logging -->
     <script src="supabase-init.js?v=24"></script>
     <!-- 3. Then load database layer -->
-    <script src="db.js?v=24"></script>
+    <script src="db.js?v=26"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=69"></script>
+    <script src="app.js?v=80"></script>
     <!-- 5. Torneos (depende de app.js y db.js) -->
     <script src="tournaments.js?v=25"></script>
 </body>
