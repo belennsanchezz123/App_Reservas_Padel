@@ -1,9 +1,21 @@
 # Seguridad y roles — Cambios pendientes
 
-> **Estado actual (junio 2026):** la autenticación por roles está desactivada a propósito porque
-> el proyecto está en fase de pruebas. Tras el login de Supabase, cualquier usuario puede pulsar
-> "Coordinador" o entrar como cualquier monitor, y RLS está deshabilitado en todas las tablas.
-> Este documento recoge **todo lo que hay que cambiar** para activar la seguridad real más adelante.
+> **Estado actual (julio 2026):** el proyecto está en fase de pruebas. En algún momento se
+> aplicaron las políticas RLS **por rol** (paso 2), pero eso rompía el uso normal: los alumnos
+> no veían clases de otros monitores y los monitores **no enlazados a Auth** no podían escribir
+> (ver "⚠️ Síntoma" abajo). Por eso, para seguir probando, **se ha vuelto a desactivar RLS**
+> en las tablas implicadas: `classes`, `students`, `class_requests`, `notifications` (y, según
+> se necesite, el resto). Este documento recoge **todo lo que hay que hacer** para activar la
+> seguridad real más adelante.
+>
+> **⚠️ Síntoma clave detectado:** si una cuenta actúa como un monitor cuya fila en `monitors`
+> **no tiene `auth_user_id`** enlazado al usuario de Auth con el que se ha hecho login, entonces
+> `current_monitor_id()` devuelve NULL y **RLS le deniega escribir** (crear/editar clases). La app
+> lo captura y guarda **solo en localStorage**, mostrando el toast naranja
+> *"Clase actualizada localmente (sin conexión)"* — el cambio **no llega a Supabase** y los demás
+> (p. ej. el alumno) nunca lo ven. **Pendiente obligatorio antes de reactivar RLS:** enlazar cada
+> monitor con su usuario de Auth (`UPDATE monitors SET auth_user_id = '<uuid>' WHERE id = '<monitor_id>';`,
+> ver §2.1) y cada alumno con acceso (§6).
 
 ---
 
@@ -285,3 +297,36 @@ SELECT id, name, permissions FROM monitors WHERE 'usuario' = ANY(permissions);
 **Bloqueo por impago:** al entrar, si el alumno tiene una cuota mensual sin pagar de
 un mes anterior (o del mes actual pasado el día 5), ve una pantalla de bloqueo en
 vez del panel (`findBlockingUnpaidQuota` en `app.js`).
+
+---
+
+## 7. Solicitudes de inscripción + notificaciones — RLS PENDIENTE
+
+`class_requests.sql` crea `class_requests` y `notifications` con **RLS deshabilitado**
+("modo simple", igual que el resto). Al activar RLS habrá que añadir políticas
+(hoy la validación de nivel/aforo/duplicados vive solo en el cliente, `app.js`):
+
+```sql
+ALTER TABLE class_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications  ENABLE ROW LEVEL SECURITY;
+
+-- El alumno crea/lee SUS solicitudes; el monitor lee/resuelve las de SUS clases.
+CREATE POLICY class_requests_student ON class_requests
+    FOR ALL TO authenticated
+    USING (student_id = public.current_student_id())
+    WITH CHECK (student_id = public.current_student_id());
+CREATE POLICY class_requests_monitor ON class_requests
+    FOR ALL TO authenticated
+    USING (monitor_id = public.current_monitor_id());
+
+-- Cada usuario solo ve/actualiza sus notificaciones.
+CREATE POLICY notifications_own ON notifications
+    FOR ALL TO authenticated
+    USING (recipient_id = public.current_student_id()
+        OR recipient_id = public.current_monitor_id());
+```
+
+**Nota Realtime:** ambas tablas están en la publicación `supabase_realtime`. Con RLS
+activo, Supabase Realtime respeta las políticas (cada quien solo recibe sus filas),
+lo que refuerza el modelo. `subscribeToNotifications` filtra además por
+`recipient_id` en el cliente.

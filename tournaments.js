@@ -439,10 +439,11 @@ async function submitTournament() {
     }
 }
 
-function confirmDeleteTournament(id) {
+async function confirmDeleteTournament(id) {
     const t = appState.tournaments.find(x => x.id === id);
     if (!t) return;
-    if (!confirm(`¿Eliminar el torneo "${t.name}" y todos sus partidos?`)) return;
+    if (!(await showConfirm(`¿Eliminar el torneo "${t.name}" y todos sus partidos?`,
+        { title: 'Eliminar torneo', confirmText: 'Eliminar', danger: true }))) return;
     db.deleteTournament(id)
         .then(async () => {
             await loadTournaments();

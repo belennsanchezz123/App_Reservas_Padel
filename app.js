@@ -28,6 +28,9 @@ const appState = {
     avisosCollapsed: true,
     gestionSearch: '',
     gestionData: null,
+    // Solicitudes de inscripción (alumno -> monitor) y notificaciones realtime.
+    monitorRequests: [],      // solicitudes pendientes del monitor logueado
+    notifChannel: null,       // canal de Supabase Realtime del usuario actual
 };
 
 const CONFIG = {
@@ -343,7 +346,11 @@ function toggleSidebar() {
 
 
 function logout() {
+    // Cerrar el canal de notificaciones en tiempo real del usuario saliente.
+    if (typeof unsubscribeFromNotifications === 'function') unsubscribeFromNotifications();
+
     appState.currentUser = null;
+    appState.monitorRequests = [];
     localStorage.removeItem('padelApp_currentUser');
     localStorage.removeItem('padelApp_dbLogin');
 
@@ -2475,10 +2482,11 @@ function renderStudentsList() {
     });
 }
 
-function confirmDeleteStudent(studentId) {
+async function confirmDeleteStudent(studentId) {
     const student = getStudentById(studentId);
     if (!student) return;
-    const ok = confirm(`¿Eliminar alumno ${student.name}? Esta acción no se puede deshacer.`);
+    const ok = await showConfirm(`¿Eliminar alumno ${student.name}? Esta acción no se puede deshacer.`,
+        { title: 'Eliminar alumno', confirmText: 'Eliminar', danger: true });
     if (!ok) return;
     deleteStudent(studentId);
 }
@@ -3721,9 +3729,10 @@ function showClassDetails(classId) {
             cancelBtn.id = 'cancelDraggedClassBtn';
             cancelBtn.className = 'btn btn-secondary';
             cancelBtn.textContent = 'Cancelar cambios';
-            cancelBtn.addEventListener('click', (e) => {
+            cancelBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                if (confirm('¿Cancelar los cambios realizados arrastrando la clase?')) {
+                if (await showConfirm('¿Cancelar los cambios realizados arrastrando la clase?',
+                    { title: 'Cancelar cambios', confirmText: 'Sí, cancelar', cancelText: 'No' })) {
                     cancelPendingSave();
                 }
             });
@@ -4099,7 +4108,8 @@ async function copyCurrentWeekToNext() {
 
         const existingTarget = getClassesForWeek(targetWeekStart);
         if (existingTarget.length > 0) {
-            const ok = confirm('La semana siguiente ya tiene clases. ¿Quieres copiar igualmente y añadir más?');
+            const ok = await showConfirm('La semana siguiente ya tiene clases. ¿Quieres copiar igualmente y añadir más?',
+                { title: 'Copiar semana', confirmText: 'Copiar igualmente' });
             if (!ok) return;
         }
 
@@ -4185,6 +4195,102 @@ function showToast(message, type = 'success') {
 }
 
 // ==========================================
+// DIÁLOGOS PROPIOS (sustituyen a confirm()/alert()/prompt() nativos, que el
+// navegador muestra como "localhost dice"). Reutilizan el estilo de modales de
+// la app y devuelven una promesa. Uso: `if (await showConfirm('...')) { ... }`.
+// ==========================================
+
+// Confirmación. Resuelve true (Aceptar) o false (Cancelar/Escape/fondo).
+function showConfirm(message, options = {}) {
+    const {
+        title = 'Confirmar',
+        confirmText = 'Aceptar',
+        cancelText = 'Cancelar',
+        danger = false,
+    } = options;
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal modal-center active app-dialog';
+        overlay.innerHTML = `
+            <div class="modal-content modal-compact">
+                <div class="modal-header"><h3>${escapeHtml(title)}</h3></div>
+                <div class="modal-body"><p class="app-dialog-msg">${escapeHtml(message)}</p></div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" data-act="cancel">${escapeHtml(cancelText)}</button>
+                    <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-act="ok">${escapeHtml(confirmText)}</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const close = (val) => { document.removeEventListener('keydown', onKey); overlay.remove(); resolve(val); };
+        const onKey = (e) => { if (e.key === 'Escape') close(false); else if (e.key === 'Enter') close(true); };
+        overlay.querySelector('[data-act="ok"]').addEventListener('click', () => close(true));
+        overlay.querySelector('[data-act="cancel"]').addEventListener('click', () => close(false));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+        document.addEventListener('keydown', onKey);
+        setTimeout(() => overlay.querySelector('[data-act="ok"]').focus(), 30);
+    });
+}
+
+// Aviso informativo con un solo botón. Resuelve al cerrarse.
+function showAlert(message, options = {}) {
+    const { title = 'Aviso', okText = 'Aceptar' } = options;
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal modal-center active app-dialog';
+        overlay.innerHTML = `
+            <div class="modal-content modal-compact">
+                <div class="modal-header"><h3>${escapeHtml(title)}</h3></div>
+                <div class="modal-body"><p class="app-dialog-msg">${escapeHtml(message)}</p></div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" data-act="ok">${escapeHtml(okText)}</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const close = () => { document.removeEventListener('keydown', onKey); overlay.remove(); resolve(); };
+        const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') close(); };
+        overlay.querySelector('[data-act="ok"]').addEventListener('click', close);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+        document.addEventListener('keydown', onKey);
+        setTimeout(() => overlay.querySelector('[data-act="ok"]').focus(), 30);
+    });
+}
+
+// Pide un texto. Resuelve con el valor (string) o null si se cancela.
+function showPrompt(message, defaultValue = '', options = {}) {
+    const {
+        title = 'Introduce un valor',
+        confirmText = 'Aceptar',
+        cancelText = 'Cancelar',
+    } = options;
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal modal-center active app-dialog';
+        overlay.innerHTML = `
+            <div class="modal-content modal-compact">
+                <div class="modal-header"><h3>${escapeHtml(title)}</h3></div>
+                <div class="modal-body">
+                    <p class="app-dialog-msg">${escapeHtml(message)}</p>
+                    <input type="text" class="app-dialog-input">
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" data-act="cancel">${escapeHtml(cancelText)}</button>
+                    <button class="btn btn-primary" data-act="ok">${escapeHtml(confirmText)}</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('.app-dialog-input');
+        input.value = defaultValue;
+        const close = (val) => { document.removeEventListener('keydown', onKey); overlay.remove(); resolve(val); };
+        const onKey = (e) => { if (e.key === 'Escape') close(null); else if (e.key === 'Enter') close(input.value); };
+        overlay.querySelector('[data-act="ok"]').addEventListener('click', () => close(input.value));
+        overlay.querySelector('[data-act="cancel"]').addEventListener('click', () => close(null));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+        document.addEventListener('keydown', onKey);
+        setTimeout(() => { input.focus(); input.select(); }, 30);
+    });
+}
+
+// ==========================================
 // CLASS COMPLETION TOGGLE
 // ==========================================
 
@@ -4210,7 +4316,8 @@ async function markAbsence(classId, studentId) {
     const student = getStudentById(studentId);
     if (!cls || !student) return;
 
-    if (!confirm(`¿Marcar a ${student.name} como ausente? Se le añadirá una clase por recuperar.`)) return;
+    if (!(await showConfirm(`¿Marcar a ${student.name} como ausente? Se le añadirá una clase por recuperar.`,
+        { title: 'Marcar ausencia', confirmText: 'Marcar ausente' }))) return;
 
     try {
         await db.createRecovery({
@@ -4486,6 +4593,11 @@ function showMonitorView() {
 
     renderCalendar();
     renderStudentsList();
+
+    // Solicitudes de inscripción: solo el monitor las gestiona.
+    renderSolicitudesBadge();
+    const monitorId = getCurrentUser()?.id;
+    if (isMonitor() && monitorId) subscribeToNotifications(monitorId);
 }
 
 function showRecepcionView() {
@@ -4522,6 +4634,10 @@ function showStudentView() {
     if (sidebar) sidebar.style.display = 'none';
 
     renderStudentDashboard();
+
+    // Notificaciones en tiempo real (aceptada/rechazada) para el alumno.
+    const studentId = getCurrentUser()?.studentId || getCurrentUser()?.id;
+    if (studentId) subscribeToNotifications(studentId);
 }
 
 // Periodo 'YYYY-MM' de una fecha (por defecto, hoy).
@@ -4613,19 +4729,27 @@ async function renderStudentDashboard() {
 
     container.innerHTML = '<p class="profile-loading">Cargando tu información...</p>';
 
-    // Cargar pagos y recuperaciones del alumno.
+    // Cargar pagos, recuperaciones y solicitudes de inscripción del alumno.
     let payments = [];
     let recoveries = [];
+    let requests = [];
     try {
-        const [pData, rData] = await Promise.all([
+        const [pData, rData, sData] = await Promise.all([
             db.getPaymentsByStudent(studentId),
             db.getRecoveriesByStudent(studentId).catch(() => []),
+            db.getRequestsByStudent(studentId).catch(() => []),
         ]);
         payments = pData.map(p => db.convertPaymentFromDB(p));
         recoveries = rData.map(r => db.convertRecoveryFromDB(r));
+        requests = sData.map(s => db.convertRequestFromDB(s));
     } catch (e) {
         console.error('Error cargando datos del alumno:', e);
     }
+
+    // Ids de clases con solicitud pendiente (para no ofrecer "Solicitar" dos veces).
+    const pendingRequestClassIds = new Set(
+        requests.filter(r => r.status === 'pendiente').map(r => r.classId)
+    );
 
     // 1) Bloqueo por impago (tiene prioridad sobre todo lo demás).
     const blockingQuota = findBlockingUnpaidQuota(payments);
@@ -4699,6 +4823,11 @@ async function renderStudentDashboard() {
             const isNew = !seen.includes(cls.id);
             const avg = avgLevelOfClass(cls);
             const monitor = cls.monitorName ? ` · ${escapeHtml(cls.monitorName)}` : '';
+            // ¿El alumno ya tiene una solicitud pendiente para esta clase?
+            const alreadyRequested = pendingRequestClassIds.has(cls.id);
+            const actionBtn = alreadyRequested
+                ? '<span class="notice-req-pending">Solicitud enviada</span>'
+                : `<button class="btn btn-sm btn-primary notice-req-btn" onclick="requestClassEnrollment('${escapeHtml(cls.id)}')">Solicitar plaza</button>`;
             return `
                 <div class="notice-row ${isNew ? 'notice-new' : ''}">
                     <span class="notice-icon">🎾</span>
@@ -4706,13 +4835,36 @@ async function renderStudentDashboard() {
                         <div class="notice-title">${escapeHtml(formatDate(cls.date))} · ${escapeHtml(cls.startTime)}-${escapeHtml(cls.endTime)}${monitor}</div>
                         <div class="notice-sub">${cls.students.length}/${cls.maxCapacity} plazas · nivel medio ${avg != null ? avg.toFixed(1) : '—'}</div>
                     </div>
-                    ${isNew ? '<span class="notice-badge">Nuevo</span>' : ''}
+                    <div class="notice-actions">
+                        ${isNew ? '<span class="notice-badge">Nuevo</span>' : ''}
+                        ${actionBtn}
+                    </div>
                 </div>`;
         }).join('');
 
     const markSeenBtn = unseenCount > 0
         ? `<button class="btn btn-sm btn-secondary" onclick='markFreeClassesSeen(${JSON.stringify(studentId)}, ${JSON.stringify(freeIds)})'>Marcar como leídos</button>`
         : '';
+
+    // 5) Mis solicitudes: estado de las inscripciones pedidas (notificación al alumno).
+    const requestsHtml = requests.length === 0
+        ? '<p class="student-empty">Aún no has solicitado plaza en ninguna clase.</p>'
+        : requests.map(r => {
+            const cls = r.classId ? getClassById(r.classId) : null;
+            const dateLabel = cls ? `${formatDate(cls.date)} · ${cls.startTime}` : 'Clase';
+            const badge = requestStatusBadge(r);
+            const reason = (r.status === 'rechazada' && r.reason) ? `<div class="request-reason">${escapeHtml(r.reason)}</div>` : '';
+            return `
+                <div class="request-row">
+                    <span class="request-icon">📩</span>
+                    <div class="request-body">
+                        <div class="request-title">${escapeHtml(dateLabel)}</div>
+                        ${reason}
+                    </div>
+                    ${badge}
+                </div>`;
+        }).join('');
+    const pendingRequestsCount = requests.filter(r => r.status === 'pendiente').length;
 
     container.innerHTML = `
         <div class="student-greeting">
@@ -4721,15 +4873,15 @@ async function renderStudentDashboard() {
         </div>
 
         <div class="student-cards">
-            <div class="student-card student-card-stat">
+            <div class="student-card student-card-stat student-card-clickable" onclick="scrollToStudentSection('cuotasSection')" title="Ver mis cuotas">
                 <span class="student-stat-label">Total pagado</span>
                 <span class="student-stat-value">€${totalPaid.toFixed(2)}</span>
             </div>
-            <div class="student-card student-card-stat">
+            <div class="student-card student-card-stat student-card-clickable" onclick="scrollToStudentSection('cuotasSection')" title="Ver mis cuotas">
                 <span class="student-stat-label">Cuotas pendientes</span>
                 <span class="student-stat-value ${pendingPayments.length ? 'is-warn' : ''}">${pendingPayments.length}</span>
             </div>
-            <div class="student-card student-card-stat">
+            <div class="student-card student-card-stat student-card-clickable" onclick="scrollToStudentSection('recuperarSection')" title="Ver clases por recuperar">
                 <span class="student-stat-label">Por recuperar</span>
                 <span class="student-stat-value ${pendingRecoveries.length ? 'is-warn' : ''}">${pendingRecoveries.length}</span>
             </div>
@@ -4747,15 +4899,375 @@ async function renderStudentDashboard() {
         </div>
 
         <div class="student-section">
+            <div class="student-section-head">
+                <h3>📩 Mis solicitudes ${pendingRequestsCount > 0 ? `<span class="notice-count">${pendingRequestsCount}</span>` : ''}</h3>
+            </div>
+            <div class="student-section-body">${requestsHtml}</div>
+        </div>
+
+        <div class="student-section" id="cuotasSection">
             <div class="student-section-head"><h3>💳 Mis cuotas</h3></div>
             <div class="student-section-body">${paymentsHtml}</div>
         </div>
 
-        <div class="student-section">
+        <div class="student-section" id="recuperarSection">
             <div class="student-section-head"><h3>🔁 Clases por recuperar</h3></div>
             <div class="student-section-body">${recoveriesHtml}</div>
         </div>
     `;
+}
+
+// Desplaza suave hasta una sección del panel del alumno y la resalta un instante.
+function scrollToStudentSection(sectionId) {
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    section.classList.add('section-highlight');
+    setTimeout(() => section.classList.remove('section-highlight'), 1200);
+}
+
+// ==========================================
+// SOLICITUDES DE INSCRIPCIÓN (alumno -> monitor) + NOTIFICACIONES
+// Sistema modular y reutilizable: la fuente de verdad es class_requests;
+// las notificaciones (tabla notifications) son el canal de avisos + Realtime.
+// ==========================================
+
+// Badge de estado para "Mis solicitudes" (panel del alumno).
+function requestStatusBadge(request) {
+    switch (request.status) {
+        case 'aceptada':  return '<span class="pay-badge paid">Aceptada</span>';
+        case 'rechazada': return '<span class="pay-badge none">Rechazada</span>';
+        default:          return '<span class="pay-badge partial">Pendiente</span>';
+    }
+}
+
+// El alumno solicita plaza en una clase de su nivel (desde la sección Avisos).
+async function requestClassEnrollment(classId) {
+    const user = getCurrentUser();
+    const studentId = user?.studentId || user?.id;
+    const student = getStudentById(studentId);
+    const cls = getClassById(classId);
+
+    if (!student || !cls) {
+        showToast('No se pudo procesar la solicitud', 'error');
+        return;
+    }
+
+    // Validaciones (defensa en profundidad, no solo confiar en el filtro de Avisos):
+    if ((cls.students || []).includes(studentId)) {
+        showToast('Ya estás inscrito en esta clase', 'warning');
+        return;
+    }
+    if ((cls.students || []).length >= (cls.maxCapacity || 4)) {
+        showToast('Esta clase ya está completa', 'warning');
+        renderStudentDashboard();
+        return;
+    }
+    const level = (student.level !== null && student.level !== undefined) ? Number(student.level) : null;
+    const avg = avgLevelOfClass(cls);
+    if (level === null || avg === null || Math.abs(level - avg) > 0.5) {
+        showToast('Esta clase no corresponde a tu nivel', 'warning');
+        return;
+    }
+    if (!cls.monitorId) {
+        showToast('La clase no tiene monitor asignado', 'error');
+        return;
+    }
+
+    try {
+        // Evitar duplicados: si ya hay una solicitud pendiente, no crear otra.
+        const existing = await db.getPendingRequestForClass(classId, studentId);
+        if (existing) {
+            showToast('Ya tienes una solicitud pendiente para esta clase', 'warning');
+            renderStudentDashboard();
+            return;
+        }
+
+        const created = await db.createRequest({ classId, studentId, monitorId: cls.monitorId });
+        // Notificar al monitor responsable (dispara su badge/aviso en tiempo real).
+        await db.createNotification({
+            recipientId: cls.monitorId,
+            recipientRole: 'monitor',
+            type: 'nueva_solicitud',
+            requestId: created.id,
+            classId,
+            message: `${student.name} solicita unirse a la clase del ${formatDate(cls.date)} ${cls.startTime}`,
+        }).catch(err => console.warn('No se pudo crear la notificación al monitor:', err));
+
+        showToast('Solicitud enviada al monitor');
+        renderStudentDashboard();
+    } catch (error) {
+        console.error('Error al solicitar inscripción:', error);
+        // El índice único parcial puede rechazar duplicados en carrera.
+        showToast('No se pudo enviar la solicitud', 'error');
+    }
+}
+
+// ---- Lado monitor: badge, modal y resolución de solicitudes ----
+
+// Cuenta las solicitudes pendientes del monitor logueado y pinta el badge.
+async function renderSolicitudesBadge() {
+    const btn = document.getElementById('solicitudesBtn');
+    const badge = document.getElementById('solicitudesBadge');
+    if (!btn || !badge) return;
+
+    if (!isMonitor()) {
+        btn.style.display = 'none';
+        return;
+    }
+    btn.style.display = '';
+
+    const monitorId = getCurrentUser()?.id;
+    if (!monitorId) return;
+    try {
+        const rows = await db.getRequestsByMonitor(monitorId, 'pendiente');
+        appState.monitorRequests = rows.map(r => db.convertRequestFromDB(r));
+    } catch (error) {
+        console.warn('No se pudieron cargar las solicitudes del monitor:', error);
+        appState.monitorRequests = [];
+    }
+    const count = appState.monitorRequests.length;
+    badge.textContent = count;
+    badge.style.display = count > 0 ? '' : 'none';
+}
+
+async function openSolicitudesModal() {
+    openModal('solicitudesModal');
+    await renderSolicitudesList();
+}
+
+function closeSolicitudesModal() {
+    closeModal('solicitudesModal');
+}
+
+// Lista las solicitudes pendientes del monitor con acciones Aceptar/Rechazar.
+async function renderSolicitudesList() {
+    const container = document.getElementById('solicitudesList');
+    if (!container) return;
+    container.innerHTML = '<p class="profile-loading">Cargando solicitudes...</p>';
+
+    const monitorId = getCurrentUser()?.id;
+    let requests = [];
+    try {
+        const rows = await db.getRequestsByMonitor(monitorId, 'pendiente');
+        requests = rows.map(r => db.convertRequestFromDB(r));
+    } catch (error) {
+        console.error('Error cargando solicitudes:', error);
+        container.innerHTML = '<p class="student-empty">No se pudieron cargar las solicitudes.</p>';
+        return;
+    }
+    appState.monitorRequests = requests;
+
+    if (requests.length === 0) {
+        container.innerHTML = '<p class="student-empty">No tienes solicitudes pendientes.</p>';
+        return;
+    }
+
+    container.innerHTML = requests.map(r => {
+        const student = getStudentById(r.studentId);
+        const cls = getClassById(r.classId);
+        const name = student ? student.name : 'Alumno';
+        const levelLabel = (student && student.level != null) ? ` · Nivel ${student.level}` : '';
+        const classLabel = cls
+            ? `${formatDate(cls.date)} · ${cls.startTime}-${cls.endTime} (${(cls.students || []).length}/${cls.maxCapacity})`
+            : 'Clase';
+        return `
+            <div class="solicitud-row">
+                <div class="solicitud-info">
+                    <div class="solicitud-name">${escapeHtml(name)}${levelLabel}</div>
+                    <div class="solicitud-class">${escapeHtml(classLabel)}</div>
+                </div>
+                <div class="solicitud-actions">
+                    <button class="btn btn-sm btn-primary" onclick="acceptRequest('${escapeHtml(r.id)}')">Aceptar</button>
+                    <button class="btn btn-sm btn-baja" onclick="rejectRequest('${escapeHtml(r.id)}')">Rechazar</button>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+// Aceptar: añade al alumno a la clase (respetando aforo) y notifica al alumno.
+async function acceptRequest(requestId) {
+    const request = appState.monitorRequests.find(r => r.id === requestId);
+    if (!request) {
+        showToast('Solicitud no encontrada', 'error');
+        await renderSolicitudesList();
+        return;
+    }
+
+    try {
+        // Autoridad de aforo: releer la clase desde Supabase para evitar sobrecupo.
+        let cls = null;
+        try {
+            const fresh = await db.getClassById(request.classId);
+            cls = fresh ? db.convertClassFromDB(fresh) : getClassById(request.classId);
+        } catch (e) {
+            cls = getClassById(request.classId);
+        }
+        if (!cls) {
+            showToast('La clase ya no existe', 'error');
+            await refreshSolicitudesAfterChange();
+            return;
+        }
+
+        const students = cls.students || [];
+        const student = getStudentById(request.studentId);
+
+        // Si ya está inscrito, resolver sin duplicar.
+        if (students.includes(request.studentId)) {
+            await db.updateRequestStatus(requestId, 'aceptada');
+            await notifyStudentResolution(request, 'solicitud_aceptada', cls, student, 'Ya estabas inscrito en la clase');
+            showToast('El alumno ya estaba inscrito');
+            await refreshSolicitudesAfterChange();
+            return;
+        }
+
+        // Clase llena -> auto-rechazo 'clase completa'.
+        if (students.length >= (cls.maxCapacity || 4)) {
+            await db.updateRequestStatus(requestId, 'rechazada', 'clase completa');
+            await notifyStudentResolution(request, 'solicitud_rechazada', cls, student, 'La clase está completa');
+            showToast('La clase está completa', 'warning');
+            await refreshSolicitudesAfterChange();
+            return;
+        }
+
+        // Hay hueco: inscribir al alumno (persiste + re-renderiza el calendario).
+        const newStudents = [...students, request.studentId];
+        await updateClass(request.classId, { students: newStudents }, true);
+        await db.updateRequestStatus(requestId, 'aceptada');
+        await notifyStudentResolution(request, 'solicitud_aceptada', cls, student, 'Tu solicitud ha sido aceptada');
+
+        // Si la clase queda completa, auto-rechazar el resto de pendientes.
+        if (newStudents.length >= (cls.maxCapacity || 4)) {
+            await autoRejectRemainingRequests(request.classId, requestId, cls);
+        }
+
+        showToast(`${student ? student.name : 'Alumno'} inscrito en la clase`);
+        await refreshSolicitudesAfterChange();
+    } catch (error) {
+        console.error('Error al aceptar la solicitud:', error);
+        showToast('No se pudo aceptar la solicitud', 'error');
+        await refreshSolicitudesAfterChange();
+    }
+}
+
+// Rechazar manualmente una solicitud.
+async function rejectRequest(requestId) {
+    const request = appState.monitorRequests.find(r => r.id === requestId);
+    if (!request) {
+        showToast('Solicitud no encontrada', 'error');
+        await renderSolicitudesList();
+        return;
+    }
+    try {
+        const cls = getClassById(request.classId);
+        const student = getStudentById(request.studentId);
+        await db.updateRequestStatus(requestId, 'rechazada', 'rechazada por el monitor');
+        await notifyStudentResolution(request, 'solicitud_rechazada', cls, student, 'Tu solicitud ha sido rechazada');
+        showToast('Solicitud rechazada');
+        await refreshSolicitudesAfterChange();
+    } catch (error) {
+        console.error('Error al rechazar la solicitud:', error);
+        showToast('No se pudo rechazar la solicitud', 'error');
+        await refreshSolicitudesAfterChange();
+    }
+}
+
+// Marca como 'clase completa' el resto de solicitudes pendientes de la clase.
+async function autoRejectRemainingRequests(classId, acceptedRequestId, cls) {
+    try {
+        const rows = await db.getPendingRequestsForClass(classId);
+        const remaining = rows
+            .map(r => db.convertRequestFromDB(r))
+            .filter(r => r.id !== acceptedRequestId);
+        for (const r of remaining) {
+            await db.updateRequestStatus(r.id, 'rechazada', 'clase completa');
+            const student = getStudentById(r.studentId);
+            await notifyStudentResolution(r, 'solicitud_rechazada', cls, student, 'La clase se ha completado');
+        }
+    } catch (error) {
+        console.warn('No se pudieron auto-rechazar las solicitudes restantes:', error);
+    }
+}
+
+// Crea la notificación de resultado para el alumno.
+async function notifyStudentResolution(request, type, cls, student, message) {
+    try {
+        await db.createNotification({
+            recipientId: request.studentId,
+            recipientRole: 'usuario',
+            type,
+            requestId: request.id,
+            classId: request.classId,
+            message,
+        });
+    } catch (error) {
+        console.warn('No se pudo notificar al alumno:', error);
+    }
+}
+
+// Refresca badge + modal (si está abierto) tras resolver una solicitud.
+async function refreshSolicitudesAfterChange() {
+    await renderSolicitudesBadge();
+    const modal = document.getElementById('solicitudesModal');
+    if (modal && modal.classList.contains('active')) {
+        await renderSolicitudesList();
+    }
+}
+
+// ---- Realtime cross-device (bus de notificaciones) ----
+
+// Suscribe al usuario actual a sus notificaciones (INSERT) vía Supabase Realtime.
+function subscribeToNotifications(recipientId) {
+    if (!recipientId || typeof supabase === 'undefined' || !supabase) return;
+
+    // Evitar suscripciones duplicadas.
+    unsubscribeFromNotifications();
+
+    try {
+        const channel = supabase
+            .channel('notif-' + recipientId)
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'notifications',
+                filter: 'recipient_id=eq.' + recipientId,
+            }, payload => {
+                const notif = db.convertNotificationFromDB(payload.new);
+                handleIncomingNotification(notif);
+            })
+            .subscribe();
+        appState.notifChannel = channel;
+    } catch (error) {
+        console.warn('No se pudo suscribir a notificaciones en tiempo real:', error);
+    }
+}
+
+function unsubscribeFromNotifications() {
+    if (appState.notifChannel && typeof supabase !== 'undefined' && supabase) {
+        try {
+            supabase.removeChannel(appState.notifChannel);
+        } catch (e) { /* noop */ }
+    }
+    appState.notifChannel = null;
+}
+
+// Reacciona a una notificación entrante según el rol del usuario actual.
+function handleIncomingNotification(notif) {
+    if (!notif) return;
+
+    if (notif.type === 'nueva_solicitud' && isMonitor()) {
+        // Actualiza el badge y, si el modal está abierto, refresca la lista.
+        refreshSolicitudesAfterChange();
+        showToast(notif.message || 'Nueva solicitud de inscripción');
+        return;
+    }
+
+    if ((notif.type === 'solicitud_aceptada' || notif.type === 'solicitud_rechazada') && isUsuario()) {
+        const accepted = notif.type === 'solicitud_aceptada';
+        showToast(notif.message || (accepted ? 'Solicitud aceptada' : 'Solicitud rechazada'),
+                  accepted ? 'success' : 'warning');
+        renderStudentDashboard();
+    }
 }
 
 function renderRecepcionStudentsList() {
@@ -5581,7 +6093,8 @@ function attachCalendarInteractions(host) {
 
         // Aviso de solapamiento en la pista destino.
         if (isCourtBusy(newCourt, m.matchDate, newTime, m.id)) {
-            if (!confirm(`La pista ${newCourt} ya tiene un partido que se solapa a las ${newTime}. ¿Mover de todos modos?`)) {
+            if (!(await showConfirm(`La pista ${newCourt} ya tiene un partido que se solapa a las ${newTime}. ¿Mover de todos modos?`,
+                { title: 'Pista ocupada', confirmText: 'Mover igualmente' }))) {
                 renderMatchesCalendar();
                 return;
             }
@@ -5839,7 +6352,8 @@ async function submitMatch() {
     }
     // Aviso si la pista ya está ocupada en esa franja (solapamiento de 1,5 h).
     if (court && isCourtBusy(court, matchDate, startTime)) {
-        if (!confirm(`La pista ${court} ya tiene un partido que se solapa a esa hora. ¿Crear de todos modos?`)) return;
+        if (!(await showConfirm(`La pista ${court} ya tiene un partido que se solapa a esa hora. ¿Crear de todos modos?`,
+            { title: 'Pista ocupada', confirmText: 'Crear igualmente' }))) return;
     }
 
     try {
@@ -5949,10 +6463,11 @@ async function registerMatchResult(matchId, winner) {
     }
 }
 
-function confirmDeleteMatch(matchId) {
+async function confirmDeleteMatch(matchId) {
     const match = appState.matches.find(m => m.id === matchId);
     if (!match) return;
-    if (!confirm('¿Eliminar este partido?')) return;
+    if (!(await showConfirm('¿Eliminar este partido?',
+        { title: 'Eliminar partido', confirmText: 'Eliminar', danger: true }))) return;
     db.deleteMatch(matchId)
         .then(() => {
             appState.matches = appState.matches.filter(m => m.id !== matchId);
@@ -6008,7 +6523,8 @@ async function confirmDeleteMonitor(monitorId) {
     const monitor = getMonitorById(monitorId);
     if (!monitor) return;
 
-    if (confirm(`¿Estás seguro de eliminar al monitor "${monitor.name}"? Se eliminarán también todas sus clases.`)) {
+    if (await showConfirm(`¿Estás seguro de eliminar al monitor "${monitor.name}"? Se eliminarán también todas sus clases.`,
+        { title: 'Eliminar monitor', confirmText: 'Eliminar', danger: true })) {
         await deleteMonitor(monitorId);
     }
 }
@@ -6017,7 +6533,7 @@ async function editMonitor(monitorId) {
     const monitor = getMonitorById(monitorId);
     if (!monitor) return;
 
-    const newName = prompt('Nuevo nombre:', monitor.name);
+    const newName = await showPrompt('Nuevo nombre:', monitor.name, { title: 'Editar monitor' });
     if (newName && newName.trim()) {
         await updateMonitor(monitorId, { name: newName.trim() });
     }
@@ -6487,7 +7003,7 @@ async function initializeApp() {
     } catch (error) {
         console.error('Error initializing app:', error);
         hideLoading();
-        alert('❌ Error al inicializar la aplicación.\n\nDetalles en la consola (F12)');
+        showAlert('❌ Error al inicializar la aplicación.\n\nDetalles en la consola (F12)', { title: 'Error' });
     }
 }
 

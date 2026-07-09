@@ -52,6 +52,7 @@ App_Reservas_Padel/
 ├── rls_security.sql    # RLS paso 1 (acceso total a autenticados)
 ├── rls_security_por_rol.sql # RLS paso 2 (políticas por rol)
 ├── student_role.sql    # Rol alumno: auth_user_id, student_recoveries, RLS
+├── class_requests.sql  # Solicitudes de inscripción + notifications + Realtime
 ├── matches.sql / tournaments.sql / seed_students.sql
 └── Documentacion/      # Toda la documentación .md
     ├── CLAUDE.md               # Este archivo
@@ -111,6 +112,35 @@ App_Reservas_Padel/
 
 Migración SQL en `student_role.sql` (añade `students.auth_user_id`, crea `student_recoveries` y políticas RLS por rol para el alumno).
 
+### class_requests (solicitudes de inscripción alumno → monitor)
+| Campo | Tipo |
+|---|---|
+| id | uuid |
+| class_id | text → classes |
+| student_id | text → students |
+| monitor_id | text → monitors (monitor responsable, denormalizado) |
+| status | text (`pendiente` / `aceptada` / `rechazada`) |
+| reason | text (motivo del rechazo, ej. `clase completa`; null si no aplica) |
+| created_at | timestamptz (fecha de solicitud) |
+| resolved_at | timestamptz (fecha de resolución; null si pendiente) |
+
+El alumno solicita plaza en una clase de su nivel con hueco (desde la sección "🔔 Avisos"); se crea una fila `pendiente`. El **monitor responsable** la acepta/rechaza desde su apartado "Solicitudes". Índice único parcial `(class_id, student_id) WHERE status='pendiente'` evita duplicados. Al aceptar y **llenarse** la clase, el resto de solicitudes pendientes de esa clase se auto-rechazan con `reason='clase completa'`. Migración en `class_requests.sql`.
+
+### notifications (bus genérico de notificaciones, reutilizable)
+| Campo | Tipo |
+|---|---|
+| id | uuid |
+| recipient_id | text (id de student o monitor) |
+| recipient_role | text (`usuario` / `monitor`) |
+| type | text (`nueva_solicitud` / `solicitud_aceptada` / `solicitud_rechazada`) |
+| request_id | uuid → class_requests |
+| class_id | text |
+| message | text |
+| is_read | boolean |
+| created_at | timestamptz |
+
+Bus de avisos reutilizable para futuros flujos. Es además el **canal de Supabase Realtime**: cada usuario se suscribe a sus notificaciones (`subscribeToNotifications` en `app.js`, filtro `recipient_id=eq.<yo>`) y reacciona en vivo (`handleIncomingNotification`). Ambas tablas se publican en `supabase_realtime` (ver `class_requests.sql`). Migración en `class_requests.sql`.
+
 ### classes
 | Campo | Tipo |
 |---|---|
@@ -162,12 +192,13 @@ Motor (`tournaments.js`): `computeGroupPlan(n, format)` calcula grupos/clasifica
 Los permisos viven en el array `monitors.permissions` (`coordinador` / `monitor` / `recepcion`). El rol `usuario` (alumno) **no** está en `monitors`: se deduce en el login (`resolveUserFromAuth` en `app.js`) cuando el usuario autenticado no tiene fila en `monitors` pero sí en `students` (por `students.auth_user_id`).
 
 - **Coordinador**: ve todos los monitores y sus clases, puede exportar a Excel. Su panel tiene dos pestañas: "Monitores" y "Gestión de clase" (historial de pagos de alumnos y retrasos), ver `switchCoordTab`/`renderGestionClase`.
-- **Monitor**: gestiona únicamente sus propias clases y alumnos. Desde el detalle de una clase puede "marcar ausencia" de un alumno (`markAbsence`), que genera una clase por recuperar.
+- **Monitor**: gestiona únicamente sus propias clases y alumnos. Desde el detalle de una clase puede "marcar ausencia" de un alumno (`markAbsence`), que genera una clase por recuperar. En su vista de calendario tiene el botón **"📩 Solicitudes"** (con contador de pendientes) que abre el apartado de solicitudes de inscripción de sus clases: acepta (`acceptRequest`) o rechaza (`rejectRequest`). Al aceptar, el alumno se añade a `classes.students`, el calendario se refresca y el alumno recibe notificación; si la clase se llena, el resto de solicitudes de esa clase se auto-rechazan ("clase completa").
 - **Recepción**: gestión de pagos, caja, partidos, categorías y torneos.
 - **Usuario (alumno)**: `permissions: ['usuario']`, `currentUser.studentId` = `students.id`. Panel propio (`showStudentView`/`renderStudentDashboard`) con:
   - Cuotas pagadas y pendientes (tabla `student_payments`).
   - Clases por recuperar (tabla `student_recoveries`, filas con `recovered_at` nulo).
-  - Avisos de clases libres que "cuadran" con su nivel: clases futuras, no cerradas (`is_completed=false`), con 1–3 alumnos (sin llegar a `max_capacity`) y con el nivel del alumno dentro de ±0,5 del nivel medio de los inscritos (`findFreeClassesForStudent`). El estado "visto" se guarda en `localStorage`.
+  - Avisos de clases libres que "cuadran" con su nivel: clases futuras, no cerradas (`is_completed=false`), con 1–3 alumnos (sin llegar a `max_capacity`) y con el nivel del alumno dentro de ±0,5 del nivel medio de los inscritos (`findFreeClassesForStudent`). El estado "visto" se guarda en `localStorage`. Cada aviso tiene un botón **"Solicitar plaza"** (`requestClassEnrollment`) que crea una solicitud pendiente (tabla `class_requests`) y notifica al monitor.
+  - **Mis solicitudes**: estado de las inscripciones pedidas (pendiente / aceptada / rechazada + motivo). Es la notificación visible del resultado; el alumno recibe además un aviso en vivo (Supabase Realtime) al aceptarse/rechazarse. Si le rechazan, puede solicitar otra clase de su nivel.
   - **Bloqueo por impago**: si hay una cuota mensual (`period`, sin `class_id`) sin pagar de un mes anterior, o del mes actual pasado el día 5, se muestra una pantalla de bloqueo en vez del panel (`findBlockingUnpaidQuota`).
 
 ## Funcionalidades principales
@@ -178,6 +209,7 @@ Los permisos viven en el array `monitors.permissions` (`coordinador` / `monitor`
 - Máximo 4 alumnos por clase
 - Exportar datos a Excel (SheetJS/xlsx via CDN)
 - Login con Supabase Auth (email/contraseña)
+- Solicitudes de inscripción a clase (alumno → monitor) con aprobación, notificaciones en ambos sentidos y actualización en vivo vía Supabase Realtime (tablas `class_requests` + `notifications`)
 
 ## Librerías CDN
 
@@ -197,6 +229,7 @@ No se usa ningún framework frontend (React, Vue, Angular, etc.) ni gestor de pa
 - **Orden de carga de scripts**: respetar el orden en `index.html` o la app no arranca (dependencias globales síncronas).
 - **Capacidad máxima de clase**: 4 alumnos. Esta restricción se aplica tanto en UI como en `db.js`.
 - **Slots horarios**: el drag & drop opera en intervalos de 15 minutos entre 08:00 y 23:00.
+- **Diálogos y avisos**: NO usar `confirm()`/`alert()`/`prompt()` nativos (el navegador los muestra como "localhost dice"). Usar los helpers propios de `app.js`, que devuelven una promesa y reutilizan el estilo de modales: `await showConfirm(msg, {title, confirmText, cancelText, danger})`, `await showAlert(msg, {title})`, `await showPrompt(msg, valorPorDefecto, {title})`. Para avisos transitorios (no bloqueantes), `showToast(msg, 'success'|'error'|'warning')`.
 
 ## Notas para el agente IA
 

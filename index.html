@@ -11,7 +11,7 @@
     <meta http-equiv="Expires" content="0">
     <title>Agridulce Padel Club</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=75">
+    <link rel="stylesheet" href="styles.css?v=78">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -320,6 +320,12 @@
                         <span class="btn-icon">👥</span>
                         Ver Alumnos
                     </button>
+                    <!-- Solicitudes de inscripción (solo monitor; se muestra vía JS) -->
+                    <button class="btn btn-secondary btn-solicitudes" id="solicitudesBtn" style="display:none;" onclick="openSolicitudesModal()">
+                        <span class="btn-icon">📩</span>
+                        Solicitudes
+                        <span class="notice-count" id="solicitudesBadge" style="display:none;">0</span>
+                    </button>
                     <!-- Students modal (sheet con lista scrolleable a pantalla) -->
                     <div class="modal" id="studentsModal">
                         <div class="modal-content modal-wide students-sheet">
@@ -524,6 +530,19 @@
                 </button>
                 <button class="btn btn-danger" id="deleteClassBtn">Eliminar Clase</button>
                 <button class="btn btn-primary" id="editClassBtn">Editar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Solicitudes de inscripción (monitor) -->
+    <div class="modal" id="solicitudesModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📩 Solicitudes de inscripción</h3>
+                <button class="btn-close" onclick="closeSolicitudesModal()">✕</button>
+            </div>
+            <div class="solicitudes-list" id="solicitudesList">
+                <!-- Solicitudes pendientes inyectadas por JS -->
             </div>
         </div>
     </div>
@@ -924,11 +943,11 @@
     <!-- 2. Then initialize Supabase client with detailed logging -->
     <script src="supabase-init.js?v=24"></script>
     <!-- 3. Then load database layer -->
-    <script src="db.js?v=26"></script>
+    <script src="db.js?v=28"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=80"></script>
+    <script src="app.js?v=84"></script>
     <!-- 5. Torneos (depende de app.js y db.js) -->
-    <script src="tournaments.js?v=25"></script>
+    <script src="tournaments.js?v=26"></script>
 </body>
 
 </html>

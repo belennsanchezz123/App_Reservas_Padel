@@ -327,9 +327,15 @@ const db = {
             if (updates.comments !== undefined) dbUpdates.comments = updates.comments;
             if (updates.paid !== undefined) dbUpdates.paid = updates.paid;
 
+            // UPDATE por clave primaria (id). Antes se usaba un upsert con
+            // onConflict:'monitor_id,start_at'; al enviar solo unos campos (p. ej.
+            // solo `students`) faltaban monitor_id/start_at, así que intentaba
+            // INSERTAR una fila con un id ya existente y violaba classes_pkey
+            // (error 23505). Con update por id la modificación es directa y segura.
             const { data, error } = await supabase
                 .from('classes')
-                .upsert({ id, ...dbUpdates }, { onConflict: 'monitor_id,start_at' })
+                .update(dbUpdates)
+                .eq('id', id)
                 .select()
                 .single();
 
@@ -1057,6 +1063,234 @@ const db = {
             labelB: m.label_b || null,
             winnerPairId: m.winner_pair_id || null,
             score: m.score || null,
+        };
+    },
+
+    // ==========================================
+    // CLASS REQUESTS (solicitudes de inscripción alumno -> monitor)
+    // ==========================================
+
+    // Solicitudes de un monitor filtradas por estado (por defecto pendientes).
+    async getRequestsByMonitor(monitorId, status = 'pendiente') {
+        try {
+            const { data, error } = await supabase
+                .from('class_requests')
+                .select('*')
+                .eq('monitor_id', monitorId)
+                .eq('status', status)
+                .order('created_at', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting requests by monitor:', error);
+            throw error;
+        }
+    },
+
+    // Todas las solicitudes de un alumno (para "Mis solicitudes").
+    async getRequestsByStudent(studentId) {
+        try {
+            const { data, error } = await supabase
+                .from('class_requests')
+                .select('*')
+                .eq('student_id', studentId)
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting requests by student:', error);
+            throw error;
+        }
+    },
+
+    // Solicitud pendiente concreta de un alumno para una clase (evitar duplicados).
+    async getPendingRequestForClass(classId, studentId) {
+        try {
+            const { data, error } = await supabase
+                .from('class_requests')
+                .select('*')
+                .eq('class_id', classId)
+                .eq('student_id', studentId)
+                .eq('status', 'pendiente')
+                .maybeSingle();
+            if (error) throw error;
+            return data || null;
+        } catch (error) {
+            console.error('Error getting pending request for class:', error);
+            return null;
+        }
+    },
+
+    // Todas las solicitudes pendientes de una clase (para auto-rechazo al llenarse).
+    async getPendingRequestsForClass(classId) {
+        try {
+            const { data, error } = await supabase
+                .from('class_requests')
+                .select('*')
+                .eq('class_id', classId)
+                .eq('status', 'pendiente');
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting pending requests for class:', error);
+            throw error;
+        }
+    },
+
+    async createRequest(request) {
+        try {
+            const { data, error } = await supabase
+                .from('class_requests')
+                .insert([{
+                    class_id: request.classId,
+                    student_id: request.studentId,
+                    monitor_id: request.monitorId,
+                    status: 'pendiente',
+                }])
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error creating request:', error);
+            throw error;
+        }
+    },
+
+    async updateRequestStatus(id, status, reason = null) {
+        try {
+            const { data, error } = await supabase
+                .from('class_requests')
+                .update({
+                    status,
+                    reason,
+                    resolved_at: new Date().toISOString(),
+                })
+                .eq('id', id)
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error updating request status:', error);
+            throw error;
+        }
+    },
+
+    convertRequestFromDB(r) {
+        if (!r) return null;
+        return {
+            id: r.id,
+            classId: r.class_id,
+            studentId: r.student_id,
+            monitorId: r.monitor_id,
+            status: r.status,
+            reason: r.reason || null,
+            createdAt: r.created_at,
+            resolvedAt: r.resolved_at || null,
+        };
+    },
+
+    // ==========================================
+    // NOTIFICATIONS (bus genérico, reutilizable)
+    // ==========================================
+
+    async getNotifications(recipientId) {
+        try {
+            const { data, error } = await supabase
+                .from('notifications')
+                .select('*')
+                .eq('recipient_id', recipientId)
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting notifications:', error);
+            throw error;
+        }
+    },
+
+    async getUnreadNotifications(recipientId) {
+        try {
+            const { data, error } = await supabase
+                .from('notifications')
+                .select('*')
+                .eq('recipient_id', recipientId)
+                .eq('is_read', false)
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting unread notifications:', error);
+            throw error;
+        }
+    },
+
+    async createNotification(notification) {
+        try {
+            const { data, error } = await supabase
+                .from('notifications')
+                .insert([{
+                    recipient_id: notification.recipientId,
+                    recipient_role: notification.recipientRole,
+                    type: notification.type,
+                    request_id: notification.requestId || null,
+                    class_id: notification.classId || null,
+                    message: notification.message || null,
+                }])
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error creating notification:', error);
+            throw error;
+        }
+    },
+
+    async markNotificationRead(id) {
+        try {
+            const { data, error } = await supabase
+                .from('notifications')
+                .update({ is_read: true })
+                .eq('id', id)
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error marking notification read:', error);
+            throw error;
+        }
+    },
+
+    async markAllNotificationsRead(recipientId) {
+        try {
+            const { error } = await supabase
+                .from('notifications')
+                .update({ is_read: true })
+                .eq('recipient_id', recipientId)
+                .eq('is_read', false);
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error marking all notifications read:', error);
+            throw error;
+        }
+    },
+
+    convertNotificationFromDB(n) {
+        if (!n) return null;
+        return {
+            id: n.id,
+            recipientId: n.recipient_id,
+            recipientRole: n.recipient_role,
+            type: n.type,
+            requestId: n.request_id || null,
+            classId: n.class_id || null,
+            message: n.message || null,
+            isRead: !!n.is_read,
+            createdAt: n.created_at,
         };
     },
 };

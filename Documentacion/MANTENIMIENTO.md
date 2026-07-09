@@ -148,3 +148,39 @@ calcularla con una consulta agregada aparte. Mantener la conversión
 camelCase ↔ snake_case en `db.js` (regla del proyecto).
 
 **Esfuerzo estimado:** bajo (un solo punto a tocar).
+
+---
+
+## 8. Notificaciones sin poda + validación de solicitudes solo en cliente
+
+**Estado actual:** el sistema de solicitudes de inscripción (tablas
+`class_requests` + `notifications`, ver `class_requests.sql`) funciona bien para
+el volumen de una escuela, pero tiene dos deudas conscientes:
+
+1. **`notifications` no se poda nunca.** Cada solicitud genera 1–N filas y no hay
+   borrado ni caducidad. `getNotifications`/`getUnreadNotifications` traen todo el
+   histórico del usuario. Para un club normal es despreciable; con años de uso,
+   crecerá sin límite.
+2. **La lógica de negocio vive en el cliente** (`requestClassEnrollment`,
+   `acceptRequest` en `app.js`): validación de nivel (±0,5), aforo y auto-rechazo
+   "clase completa". El aforo se re-lee de Supabase antes de aceptar, pero **dos
+   monitores aceptando a la vez** podrían sobrepasar `max_capacity` (no hay
+   bloqueo transaccional). El índice único parcial solo evita solicitudes
+   pendientes duplicadas, no la carrera de aceptación.
+
+**Qué NO es problema:** el flujo normal (un monitor por clase, pocas solicitudes
+simultáneas). El Realtime es push, no polling, así que no añade carga por sondeo.
+
+**Síntoma que indica que ha llegado el momento:** listas de "Mis solicitudes"
+muy largas, o incidencias de clases que superan las 4 plazas.
+
+**Solución prevista:**
+- Poda: marcar leídas/archivar notificaciones antiguas (`markAllNotificationsRead`
+  ya existe) y/o un borrado periódico de `notifications` con `created_at` > N meses.
+- Atomicidad: mover `acceptRequest` a una **función RPC de Postgres** (o trigger)
+  que valide aforo e inserte al alumno en una transacción, evitando el sobrecupo.
+- Activar RLS en ambas tablas (políticas ya redactadas en
+  `SEGURIDAD_ROLES_PENDIENTE.md`, sección 7).
+- Mantener la conversión camelCase ↔ snake_case en `db.js` (regla del proyecto).
+
+**Esfuerzo estimado:** medio (la RPC de aceptación atómica es el grueso).
