@@ -11,7 +11,7 @@
     <meta http-equiv="Expires" content="0">
     <title>Agridulce Padel Club</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='32' font-size='32'>🎾</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=78">
+    <link rel="stylesheet" href="styles.css?v=81">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -494,6 +494,12 @@
                     </div>
                 </div>
                 <div class="form-group">
+                    <label for="classPrecio">Precio por alumno (€)</label>
+                    <input type="number" id="classPrecio" min="1" step="0.5" value="10"
+                           placeholder="10.00">
+                    <small class="form-hint">Es lo que paga el alumno para confirmar su plaza cuando aceptas su solicitud.</small>
+                </div>
+                <div class="form-group">
                     <label for="classComments">Comentarios</label>
                     <textarea id="classComments" rows="3" placeholder="Añade comentarios sobre la clase (opcional)"></textarea>
                 </div>
@@ -943,9 +949,9 @@
     <!-- 2. Then initialize Supabase client with detailed logging -->
     <script src="supabase-init.js?v=24"></script>
     <!-- 3. Then load database layer -->
-    <script src="db.js?v=28"></script>
+    <script src="db.js?v=31"></script>
     <!-- 4. Finally load app logic -->
-    <script src="app.js?v=84"></script>
+    <script src="app.js?v=89"></script>
     <!-- 5. Torneos (depende de app.js y db.js) -->
     <script src="tournaments.js?v=26"></script>
 </body>

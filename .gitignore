@@ -1,0 +1,6 @@
+# Secretos de las Cloudflare Pages Functions (clave secreta de Stripe y
+# service_role de Supabase). NUNCA deben subirse al repositorio.
+.dev.vars
+
+node_modules/
+.wrangler/

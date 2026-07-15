@@ -161,12 +161,14 @@ el volumen de una escuela, pero tiene dos deudas conscientes:
    borrado ni caducidad. `getNotifications`/`getUnreadNotifications` traen todo el
    histórico del usuario. Para un club normal es despreciable; con años de uso,
    crecerá sin límite.
-2. **La lógica de negocio vive en el cliente** (`requestClassEnrollment`,
-   `acceptRequest` en `app.js`): validación de nivel (±0,5), aforo y auto-rechazo
-   "clase completa". El aforo se re-lee de Supabase antes de aceptar, pero **dos
-   monitores aceptando a la vez** podrían sobrepasar `max_capacity` (no hay
-   bloqueo transaccional). El índice único parcial solo evita solicitudes
-   pendientes duplicadas, no la carrera de aceptación.
+2. **Parte de la lógica de negocio sigue en el cliente.** Con el cobro (ver §9), la
+   **aceptación ya se validó en servidor** (`functions/api/checkout/create.js`
+   rehace aforo, margen y precio). La validación de nivel (±0,5) al solicitar sigue
+   siendo solo de cliente (`requestClassEnrollment` en `app.js`), pero **la carrera de
+   aceptación (sobrecupo) YA está resuelta** (jul 2026): el aforo se reserva de forma
+   atómica con la función Postgres `reserve_class_spot` (`SELECT ... FOR UPDATE`), así
+   que dos aceptaciones simultáneas no pueden pasar de `max_capacity`. Migración en
+   `race_and_cancellation.sql`; ver también `CLAUDE.md` → "Reserva atómica".
 
 **Qué NO es problema:** el flujo normal (un monitor por clase, pocas solicitudes
 simultáneas). El Realtime es push, no polling, así que no añade carga por sondeo.
@@ -177,10 +179,64 @@ muy largas, o incidencias de clases que superan las 4 plazas.
 **Solución prevista:**
 - Poda: marcar leídas/archivar notificaciones antiguas (`markAllNotificationsRead`
   ya existe) y/o un borrado periódico de `notifications` con `created_at` > N meses.
-- Atomicidad: mover `acceptRequest` a una **función RPC de Postgres** (o trigger)
-  que valide aforo e inserte al alumno en una transacción, evitando el sobrecupo.
+- ~~Atomicidad: mover la reserva de plaza a una función RPC de Postgres.~~ ✅ **Hecho**
+  (jul 2026): `reserve_class_spot` (`race_and_cancellation.sql`), llamada desde
+  `checkout/create.js`. Ya no hay sobrecupo por carrera de aceptación.
 - Activar RLS en ambas tablas (políticas ya redactadas en
   `SEGURIDAD_ROLES_PENDIENTE.md`, sección 7).
 - Mantener la conversión camelCase ↔ snake_case en `db.js` (regla del proyecto).
 
-**Esfuerzo estimado:** medio (la RPC de aceptación atómica es el grueso).
+**Esfuerzo estimado:** bajo (ya solo queda la poda de notificaciones + activar RLS).
+
+---
+
+## 9. Pagos con Stripe: filas "zombie" y carga de holds
+
+**Estado actual:** el cobro al aceptar una solicitud (ver `stripe_payments.sql` y la
+sección "Pagos con Stripe" de `CLAUDE.md`) funciona sin ningún job programado, a
+propósito: la plaza la libera el **aforo con holds** (un hold con `payment_expires_at`
+vencido deja de contar), y la fila la cierra el webhook `checkout.session.expired`.
+De ahí salen dos deudas conscientes:
+
+1. **Filas "zombie" si un webhook nunca llega.** Si Stripe no consigue entregar el
+   evento (endpoint caído mucho tiempo, secreto mal configurado), la solicitud se queda
+   en `aceptada_pendiente_pago` para siempre. **No afecta al aforo** (el hold caducado
+   ya no retiene la plaza) ni al alumno (su panel muestra "El plazo ha terminado"), pero
+   ensucia el histórico y la solicitud nunca llega a `cancelada_por_impago`.
+2. **`getActiveHolds()` trae los holds de TODA la app**, no los de una clase. Como solo
+   existen mientras un pago está en curso (minutos u horas), en la práctica son un puñado
+   de filas. Solo crecería si el club llegara a tener muchísimos pagos simultáneos.
+
+**Qué NO es problema:** el doble cobro ni la doble inscripción. `confirmPayment` es
+idempotente y la unicidad de `stripe_session_id` lo garantiza aunque Stripe reintente el
+evento o el alumno vuelva a la app antes que el webhook.
+
+**Síntoma que indica que ha llegado el momento:** filas viejas en
+`aceptada_pendiente_pago` con `payment_expires_at` muy pasado (consulta de control), o el
+panel del alumno tardando en cargar.
+
+**Solución prevista:**
+- Zombies: un barrido periódico (pg_cron en Supabase, o un `scheduled` handler) que pase a
+  `cancelada_por_impago` las solicitudes con `payment_expires_at < now()`. Reutilizar la
+  lógica de `cancelForNonPayment` (`functions/_shared/fulfillment.js`), que ya es idempotente.
+- Holds: filtrar `getActiveHolds()` por las clases visibles, igual que la §1 hará con las clases.
+
+**Esfuerzo estimado:** bajo (el barrido es una query + reutilizar código existente).
+
+---
+
+## 10. Política de precios de las clases (DECISIÓN PENDIENTE)
+
+**Estado actual:** `classes.precio` (numeric, default **10,00 €**) es un campo **editable a
+mano** en el formulario de clase. Es lo que paga el alumno para confirmar su plaza.
+
+**Lo que falta decidir (no es técnico, es de negocio):** si el precio es fijo para todas las
+clases, por nivel, por tipo de clase, por duración, o por número de alumnos. Se dejó como campo
+manual **a propósito** para no bloquear la implementación del cobro.
+
+**Cuándo abordarlo:** antes de cobrar de verdad (hoy todo está en modo test de Stripe).
+
+**Solución prevista:** según lo que se decida, o bien un precio único en `CONFIG`, o bien
+calcularlo al crear la clase. El resto del flujo no cambia: `checkout/create.js` ya lee el
+importe de `classes.precio` y lo **congela** en `class_requests.price` al aceptar, así que
+cambiar la política no altera los pagos ya acordados.

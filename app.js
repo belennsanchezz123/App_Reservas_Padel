@@ -26,11 +26,16 @@ const appState = {
     calendarDate: null,
     coordTab: 'monitores',
     avisosCollapsed: true,
+    misClasesCollapsed: false,
+    solicitudesCollapsed: false,
+    cuotasCollapsed: false,
+    recuperarCollapsed: false,
     gestionSearch: '',
     gestionData: null,
     // Solicitudes de inscripción (alumno -> monitor) y notificaciones realtime.
     monitorRequests: [],      // solicitudes pendientes del monitor logueado
     notifChannel: null,       // canal de Supabase Realtime del usuario actual
+    classHolds: [],           // solicitudes con el pago en curso: retienen plaza (ver occupancyOf)
 };
 
 const CONFIG = {
@@ -44,6 +49,11 @@ const CONFIG = {
     numCourts: 10,
     matchDurationMin: 90,
 };
+
+// Precio por defecto de una clase (EUR). Coincide con el DEFAULT de la columna
+// classes.precio. La política de precios definitiva (por nivel, por tipo de clase...)
+// está pendiente de decidir: de momento el precio es editable clase a clase.
+const DEFAULT_CLASS_PRICE = 10;
 
 // Nº de pistas configurable, persistido en el navegador (localStorage).
 function getNumCourts() {
@@ -768,13 +778,18 @@ async function loadAllData() {
     try {
         showLoading('Cargando datos...');
 
-        const [monitorsData, studentsData, classesData, matchesData] = await Promise.all([
+        const [monitorsData, studentsData, classesData, matchesData, holdsData] = await Promise.all([
             db.getMonitors(),
             db.getStudents(),
             db.getClasses(),
             db.getMatches().catch(err => {
                 // La tabla matches puede no existir aún (ejecutar matches.sql).
                 console.warn('No se pudieron cargar los partidos (¿falta ejecutar matches.sql?):', err);
+                return [];
+            }),
+            db.getActiveHolds().catch(err => {
+                // Las columnas de pago pueden no existir aún (ejecutar stripe_payments.sql).
+                console.warn('No se pudieron cargar las plazas retenidas (¿falta ejecutar stripe_payments.sql?):', err);
                 return [];
             })
         ]);
@@ -783,6 +798,7 @@ async function loadAllData() {
         appState.students = studentsData.map(s => db.convertStudentFromDB(s));
         appState.classes = classesData.map(c => db.convertClassFromDB(c));
         appState.matches = matchesData.map(m => db.convertMatchFromDB(m));
+        appState.classHolds = holdsData.map(h => db.convertRequestFromDB(h));
 
         // Torneos (función definida en tournaments.js; tolera tabla inexistente).
         if (typeof loadTournaments === 'function') await loadTournaments();
@@ -3603,6 +3619,9 @@ function openAddClassModal(day = '', hour = null, minute = 0) {
     const commentsEl = document.getElementById('classComments');
     if (commentsEl) commentsEl.value = '';
 
+    const precioEl = document.getElementById('classPrecio');
+    if (precioEl) precioEl.value = DEFAULT_CLASS_PRICE;
+
     const recurringSection = document.getElementById('recurringSection');
     if (recurringSection) recurringSection.style.display = '';
     const recurringEnabled = document.getElementById('recurringEnabled');
@@ -3642,6 +3661,9 @@ function openEditClassModal(classId) {
 
     const commentsEl = document.getElementById('classComments');
     if (commentsEl) commentsEl.value = cls.comments || '';
+
+    const precioEl = document.getElementById('classPrecio');
+    if (precioEl) precioEl.value = cls.precio != null ? cls.precio : DEFAULT_CLASS_PRICE;
 
     appState.selectedClass = classId;
 
@@ -3794,6 +3816,11 @@ async function handleClassFormSubmit(e) {
     const commentsEl = document.getElementById('classComments');
     const comments = commentsEl ? commentsEl.value.trim() : '';
 
+    // Precio que pagará el alumno al aceptarse su solicitud (ver stripe_payments.sql).
+    const precioEl = document.getElementById('classPrecio');
+    const precioRaw = precioEl ? parseFloat(precioEl.value) : NaN;
+    const precio = Number.isFinite(precioRaw) && precioRaw > 0 ? precioRaw : DEFAULT_CLASS_PRICE;
+
     const selectedStudents = Array.isArray(appState.tempSelectedStudents) ? appState.tempSelectedStudents : [];
 
     if (selectedStudents.length > CONFIG.maxStudentsPerClass) {
@@ -3842,6 +3869,7 @@ async function handleClassFormSubmit(e) {
                 endTime,
                 students: selectedStudents,
                 comments,
+                precio,
             });
             appState.selectedClass = null;
         } else {
@@ -3880,6 +3908,7 @@ async function handleClassFormSubmit(e) {
                         monitorId,
                         monitorName,
                         comments,
+                        precio,
                         recurringGroupId: groupId,
                     });
                 }
@@ -3896,7 +3925,7 @@ async function handleClassFormSubmit(e) {
                 saveToLocalStorage();
                 showToast(`${classesToCreate.length} clases recurrentes creadas`, 'success');
             } else {
-                await addClassOnDate(date, day, startTime, endTime, selectedStudents, comments, null);
+                await addClassOnDate(date, day, startTime, endTime, selectedStudents, comments, null, precio);
                 renderCalendar();
                 saveToLocalStorage();
                 showToast('Clase creada correctamente', 'success');
@@ -3970,7 +3999,7 @@ async function confirmDeleteRecurringGroup() {
     }
 }
 
-async function addClassOnDate(date, day, startTime, endTime, studentIds, comments, recurringGroupId = null) {
+async function addClassOnDate(date, day, startTime, endTime, studentIds, comments, recurringGroupId = null, precio = null) {
     const currentUser = getCurrentUser();
     let monitorId = null;
     let monitorName = null;
@@ -3996,6 +4025,7 @@ async function addClassOnDate(date, day, startTime, endTime, studentIds, comment
         monitorId,
         monitorName,
         comments,
+        precio,
         recurringGroupId,
     };
 
@@ -4387,6 +4417,46 @@ function showMainApp() {
     } else {
         showMonitorView();
     }
+
+    handleStripeReturn();
+}
+
+// El alumno vuelve de Stripe Checkout (success_url / cancel_url).
+// La confirmación real la hace el webhook, pero puede tardar unos segundos: aquí
+// preguntamos el estado a Stripe para que el alumno vea su plaza confirmada al
+// instante. Si el webhook llega después, no pasa nada: la operación es idempotente.
+async function handleStripeReturn() {
+    const params = new URLSearchParams(window.location.search);
+    const pago = params.get('pago');
+    const requestId = params.get('request');
+    if (!pago) return;
+
+    // Limpiar la query para que un refresco no repita el aviso.
+    window.history.replaceState({}, '', window.location.pathname);
+
+    if (pago === 'cancelado') {
+        showToast('Pago cancelado. Tu plaza sigue reservada hasta que caduque el plazo.', 'warning');
+        renderStudentDashboard();
+        return;
+    }
+
+    if (pago === 'ok' && requestId) {
+        try {
+            const { status } = await db.getCheckoutStatus(requestId);
+            if (status === 'confirmada_pagada') {
+                showToast('¡Pago recibido! Tu plaza está confirmada 🎾', 'success');
+            } else if (status === 'cancelada_por_impago') {
+                showToast('El plazo de pago había terminado y la plaza se liberó.', 'warning');
+            } else {
+                showToast('Estamos confirmando tu pago...', 'success');
+            }
+        } catch (error) {
+            console.warn('No se pudo confirmar el pago al volver de Stripe:', error);
+            showToast('Estamos confirmando tu pago...', 'success');
+        }
+        await refreshClassHolds();
+        renderStudentDashboard();
+    }
 }
 
 function hideMainApp() {
@@ -4676,20 +4746,81 @@ function avgLevelOfClass(cls) {
     return levels.reduce((a, b) => a + b, 0) / levels.length;
 }
 
+// ---- Aforo y plazos de pago (ver stripe_payments.sql) ----
+
+// Antelación mínima para poder solicitar una clase: 30 min de margen antes de que
+// empiece + los 30 min mínimos que Stripe exige que viva una sesión de Checkout.
+// Por debajo de esa hora no hay forma de cobrar a tiempo.
+const MIN_LEAD_MINUTES = 60;
+
+// Instante de inicio de la clase (cls.date es YYYY-MM-DD y cls.startTime "HH:MM",
+// ambos en hora local, que es la del navegador de la escuela).
+function classStartDate(cls) {
+    if (!cls || !cls.date || !cls.startTime) return null;
+    const d = new Date(`${String(cls.date).substring(0, 10)}T${cls.startTime}:00`);
+    return isNaN(d.getTime()) ? null : d;
+}
+
+function minutesUntilClass(cls) {
+    const start = classStartDate(cls);
+    if (!start) return null;
+    return (start.getTime() - Date.now()) / 60000;
+}
+
+// Ocupación real: alumnos confirmados + plazas retenidas por pagos en curso.
+// Un hold caducado no cuenta: la plaza vuelve a estar libre aunque el webhook de
+// expiración de Stripe todavía no haya llegado.
+function occupancyOf(cls) {
+    if (!cls) return 0;
+    const now = Date.now();
+    const holds = (appState.classHolds || []).filter(h =>
+        h.classId === cls.id &&
+        h.paymentExpiresAt &&
+        new Date(h.paymentExpiresAt).getTime() > now
+    );
+    return (cls.students || []).length + holds.length;
+}
+
+function classIsFull(cls) {
+    return occupancyOf(cls) >= (cls.maxCapacity || CONFIG.maxStudentsPerClass);
+}
+
+// Recarga las plazas retenidas (tras aceptar, pagar o expirar un pago).
+async function refreshClassHolds() {
+    try {
+        const rows = await db.getActiveHolds();
+        appState.classHolds = rows.map(r => db.convertRequestFromDB(r));
+    } catch (e) {
+        console.warn('No se pudieron recargar las plazas retenidas:', e);
+    }
+}
+
+// "1h 25min" / "18 min" — para la cuenta atrás del plazo de pago.
+function formatTimeLeft(isoDate) {
+    if (!isoDate) return '';
+    const ms = new Date(isoDate).getTime() - Date.now();
+    if (ms <= 0) return 'caducado';
+    const totalMin = Math.floor(ms / 60000);
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    return hours > 0 ? `${hours}h ${mins}min` : `${mins} min`;
+}
+
 // Clases libres futuras que "cuadran" con el nivel del alumno:
-// no cerradas, con 1-3 alumnos (sin llegar a la capacidad), el alumno no
-// inscrito, y su nivel dentro de ±0,5 del nivel medio de los inscritos.
+// no cerradas, con 1-3 alumnos (sin llegar a la capacidad, contando las plazas
+// retenidas por pagos en curso), el alumno no inscrito, su nivel dentro de ±0,5
+// del nivel medio, y con margen suficiente para procesar el pago.
 function findFreeClassesForStudent(student) {
     if (!student) return [];
-    const todayStr = new Date().toLocaleDateString('sv');
     const level = (student.level !== null && student.level !== undefined) ? Number(student.level) : null;
 
     return appState.classes.filter(cls => {
         if (!cls || cls.isCompleted) return false;
-        const dateStr = (cls.date || '').substring(0, 10);
-        if (dateStr < todayStr) return false;
+        // Debe quedar margen para cobrar (esto ya descarta las clases pasadas).
+        const minutesLeft = minutesUntilClass(cls);
+        if (minutesLeft === null || minutesLeft < MIN_LEAD_MINUTES) return false;
         const count = (cls.students || []).length;
-        if (count < 1 || count >= (cls.maxCapacity || 4)) return false;
+        if (count < 1 || classIsFull(cls)) return false;
         if (cls.students.includes(student.id)) return false;
         if (level === null) return false;
         const avg = avgLevelOfClass(cls);
@@ -4719,6 +4850,21 @@ function toggleAvisos() {
     if (section) section.classList.toggle('collapsed', appState.avisosCollapsed);
 }
 
+// Colapsa/expande la sección "Mis clases" del panel del alumno (sin re-render).
+function toggleMisClases() {
+    appState.misClasesCollapsed = !appState.misClasesCollapsed;
+    const section = document.getElementById('misClasesSection');
+    if (section) section.classList.toggle('collapsed', appState.misClasesCollapsed);
+}
+
+// Colapsa/expande cualquier sección del panel del alumno (Mis solicitudes, Cuotas,
+// Clases por recuperar). Guarda el estado en appState para que sobreviva al re-render.
+function toggleStudentSection(sectionId, stateKey) {
+    appState[stateKey] = !appState[stateKey];
+    const section = document.getElementById(sectionId);
+    if (section) section.classList.toggle('collapsed', appState[stateKey]);
+}
+
 async function renderStudentDashboard() {
     const container = document.getElementById('studentDashboardContent');
     if (!container) return;
@@ -4746,9 +4892,12 @@ async function renderStudentDashboard() {
         console.error('Error cargando datos del alumno:', e);
     }
 
-    // Ids de clases con solicitud pendiente (para no ofrecer "Solicitar" dos veces).
+    // Ids de clases con solicitud en curso -sin resolver o con el pago pendiente-
+    // para no ofrecer "Solicitar" dos veces.
     const pendingRequestClassIds = new Set(
-        requests.filter(r => r.status === 'pendiente').map(r => r.classId)
+        requests
+            .filter(r => r.status === 'pendiente' || r.status === 'aceptada_pendiente_pago')
+            .map(r => r.classId)
     );
 
     // 1) Bloqueo por impago (tiene prioridad sobre todo lo demás).
@@ -4847,24 +4996,80 @@ async function renderStudentDashboard() {
         : '';
 
     // 5) Mis solicitudes: estado de las inscripciones pedidas (notificación al alumno).
+    //    Si el monitor ya la aceptó, aquí es donde el alumno paga: la plaza está
+    //    reservada pero NO confirmada hasta que se completa el pago.
     const requestsHtml = requests.length === 0
         ? '<p class="student-empty">Aún no has solicitado plaza en ninguna clase.</p>'
         : requests.map(r => {
             const cls = r.classId ? getClassById(r.classId) : null;
             const dateLabel = cls ? `${formatDate(cls.date)} · ${cls.startTime}` : 'Clase';
             const badge = requestStatusBadge(r);
-            const reason = (r.status === 'rechazada' && r.reason) ? `<div class="request-reason">${escapeHtml(r.reason)}</div>` : '';
+
+            let detail = '';
+            let action = '';
+
+            if (r.status === 'aceptada_pendiente_pago') {
+                const expired = r.paymentExpiresAt && new Date(r.paymentExpiresAt).getTime() <= Date.now();
+                const amount = r.price != null ? `€${Number(r.price).toFixed(2)}` : '';
+                detail = expired
+                    ? '<div class="request-reason">El plazo de pago ha terminado. Tu plaza se ha liberado.</div>'
+                    : `<div class="request-pay-info">Paga ${escapeHtml(amount)} para confirmar tu plaza · te quedan <strong>${escapeHtml(formatTimeLeft(r.paymentExpiresAt))}</strong></div>`;
+                if (!expired && r.checkoutUrl) {
+                    action = `<a class="btn btn-sm btn-primary request-pay-btn" href="${escapeHtml(r.checkoutUrl)}">Pagar ahora</a>`;
+                }
+            } else if (r.status === 'confirmada_pagada') {
+                const amount = r.price != null ? ` · €${Number(r.price).toFixed(2)} pagados` : '';
+                detail = `<div class="request-reason">Plaza confirmada${escapeHtml(amount)}</div>`;
+            } else if (r.status === 'cancelada_por_impago') {
+                detail = '<div class="request-reason">No se completó el pago, así que la plaza se liberó. Puedes volver a solicitar una clase.</div>';
+            } else if (r.status === 'rechazada' && r.reason) {
+                detail = `<div class="request-reason">${escapeHtml(r.reason)}</div>`;
+            }
+
             return `
                 <div class="request-row">
                     <span class="request-icon">📩</span>
                     <div class="request-body">
                         <div class="request-title">${escapeHtml(dateLabel)}</div>
-                        ${reason}
+                        ${detail}
                     </div>
-                    ${badge}
+                    <div class="request-right">
+                        ${badge}
+                        ${action}
+                    </div>
                 </div>`;
         }).join('');
-    const pendingRequestsCount = requests.filter(r => r.status === 'pendiente').length;
+    const pendingRequestsCount = requests.filter(r =>
+        r.status === 'pendiente' || r.status === 'aceptada_pendiente_pago'
+    ).length;
+
+    // 6) Mis clases (próximas): clases futuras donde el alumno está inscrito.
+    //    Es la única sección donde puede darse de baja (solo con >=24h de antelación).
+    const myClasses = appState.classes
+        .filter(cls => cls && !cls.isCompleted && (cls.students || []).includes(studentId))
+        .filter(cls => {
+            const mins = minutesUntilClass(cls);
+            return mins !== null && mins > 0; // solo futuras
+        })
+        .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.startTime || '').localeCompare(b.startTime || ''));
+
+    const myClassesHtml = myClasses.length === 0
+        ? '<p class="student-empty">No tienes clases próximas.</p>'
+        : myClasses.map(cls => {
+            const canLeave = minutesUntilClass(cls) >= 24 * 60;
+            const monitor = cls.monitorName ? ` · ${escapeHtml(cls.monitorName)}` : '';
+            const action = canLeave
+                ? `<button class="btn btn-sm btn-baja" onclick="leaveClass('${escapeHtml(cls.id)}')">Darme de baja</button>`
+                : '<span class="myclass-locked">No se puede cancelar (menos de 24h)</span>';
+            return `
+                <div class="request-row">
+                    <span class="request-icon">🎾</span>
+                    <div class="request-body">
+                        <div class="request-title">${escapeHtml(formatDate(cls.date))} · ${escapeHtml(cls.startTime)}-${escapeHtml(cls.endTime)}${monitor}</div>
+                    </div>
+                    <div class="request-right">${action}</div>
+                </div>`;
+        }).join('');
 
     container.innerHTML = `
         <div class="student-greeting">
@@ -4898,29 +5103,51 @@ async function renderStudentDashboard() {
             </div>
         </div>
 
-        <div class="student-section">
-            <div class="student-section-head">
+        <div class="student-section ${appState.misClasesCollapsed ? 'collapsed' : ''}" id="misClasesSection">
+            <div class="student-section-head student-section-toggle" onclick="toggleMisClases()">
+                <h3>🎾 Mis clases ${myClasses.length > 0 ? `<span class="notice-count">${myClasses.length}</span>` : ''}</h3>
+                <span class="section-chevron" aria-hidden="true"></span>
+            </div>
+            <div class="student-section-body">${myClassesHtml}</div>
+        </div>
+
+        <div class="student-section ${appState.solicitudesCollapsed ? 'collapsed' : ''}" id="solicitudesSection">
+            <div class="student-section-head student-section-toggle" onclick="toggleStudentSection('solicitudesSection', 'solicitudesCollapsed')">
                 <h3>📩 Mis solicitudes ${pendingRequestsCount > 0 ? `<span class="notice-count">${pendingRequestsCount}</span>` : ''}</h3>
+                <span class="section-chevron" aria-hidden="true"></span>
             </div>
             <div class="student-section-body">${requestsHtml}</div>
         </div>
 
-        <div class="student-section" id="cuotasSection">
-            <div class="student-section-head"><h3>💳 Mis cuotas</h3></div>
+        <div class="student-section ${appState.cuotasCollapsed ? 'collapsed' : ''}" id="cuotasSection">
+            <div class="student-section-head student-section-toggle" onclick="toggleStudentSection('cuotasSection', 'cuotasCollapsed')">
+                <h3>💳 Mis cuotas</h3>
+                <span class="section-chevron" aria-hidden="true"></span>
+            </div>
             <div class="student-section-body">${paymentsHtml}</div>
         </div>
 
-        <div class="student-section" id="recuperarSection">
-            <div class="student-section-head"><h3>🔁 Clases por recuperar</h3></div>
+        <div class="student-section ${appState.recuperarCollapsed ? 'collapsed' : ''}" id="recuperarSection">
+            <div class="student-section-head student-section-toggle" onclick="toggleStudentSection('recuperarSection', 'recuperarCollapsed')">
+                <h3>🔁 Clases por recuperar</h3>
+                <span class="section-chevron" aria-hidden="true"></span>
+            </div>
             <div class="student-section-body">${recoveriesHtml}</div>
         </div>
     `;
 }
 
 // Desplaza suave hasta una sección del panel del alumno y la resalta un instante.
+// Si la sección estaba colapsada, la expande antes (para no llevar al usuario a
+// una cabecera plegada al pulsar una tarjeta de arriba).
 function scrollToStudentSection(sectionId) {
     const section = document.getElementById(sectionId);
     if (!section) return;
+    const stateKey = { cuotasSection: 'cuotasCollapsed', recuperarSection: 'recuperarCollapsed' }[sectionId];
+    if (stateKey && appState[stateKey]) {
+        appState[stateKey] = false;
+        section.classList.remove('collapsed');
+    }
     section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     section.classList.add('section-highlight');
     setTimeout(() => section.classList.remove('section-highlight'), 1200);
@@ -4935,9 +5162,12 @@ function scrollToStudentSection(sectionId) {
 // Badge de estado para "Mis solicitudes" (panel del alumno).
 function requestStatusBadge(request) {
     switch (request.status) {
-        case 'aceptada':  return '<span class="pay-badge paid">Aceptada</span>';
-        case 'rechazada': return '<span class="pay-badge none">Rechazada</span>';
-        default:          return '<span class="pay-badge partial">Pendiente</span>';
+        case 'confirmada_pagada':      return '<span class="pay-badge paid">Confirmada</span>';
+        case 'aceptada_pendiente_pago': return '<span class="pay-badge pending-pay">Pendiente de pago</span>';
+        case 'cancelada_por_impago':   return '<span class="pay-badge none">Sin pagar</span>';
+        case 'aceptada':               return '<span class="pay-badge paid">Aceptada</span>'; // histórico (antes del cobro)
+        case 'rechazada':              return '<span class="pay-badge none">Rechazada</span>';
+        default:                       return '<span class="pay-badge partial">Pendiente</span>';
     }
 }
 
@@ -4958,7 +5188,16 @@ async function requestClassEnrollment(classId) {
         showToast('Ya estás inscrito en esta clase', 'warning');
         return;
     }
-    if ((cls.students || []).length >= (cls.maxCapacity || 4)) {
+    // Sin margen para cobrar: la plaza solo se confirma tras el pago, y hace falta
+    // al menos 1 hora (30 min de pago + 30 min de margen antes de la clase).
+    const minutesLeft = minutesUntilClass(cls);
+    if (minutesLeft === null || minutesLeft < MIN_LEAD_MINUTES) {
+        showToast('Quedan menos de 60 minutos para la clase: no hay margen suficiente para procesar el pago', 'warning');
+        renderStudentDashboard();
+        return;
+    }
+    // El aforo cuenta también las plazas retenidas por pagos en curso.
+    if (classIsFull(cls)) {
         showToast('Esta clase ya está completa', 'warning');
         renderStudentDashboard();
         return;
@@ -5003,6 +5242,40 @@ async function requestClassEnrollment(classId) {
     }
 }
 
+// El alumno se da de baja de una clase (>=24h de antelación). La baja la procesa
+// el servidor (functions/api/enrollment/leave): libera la plaza, y si la clase
+// estaba pagada la añade a "Clases por recuperar". Al liberar plaza en una clase
+// llena, el servidor avisa a los alumnos del nivel.
+async function leaveClass(classId) {
+    const user = getCurrentUser();
+    const studentId = user?.studentId || user?.id;
+    const cls = getClassById(classId);
+    if (!studentId || !cls) return;
+
+    const ok = await showConfirm(
+        `¿Seguro que quieres darte de baja de la clase del ${formatDate(cls.date)} a las ${cls.startTime}?`,
+        { title: 'Darse de baja', confirmText: 'Sí, darme de baja', cancelText: 'No', danger: true }
+    );
+    if (!ok) return;
+
+    try {
+        const res = await db.leaveClass(classId, studentId);
+        showToast(res.recovery
+            ? 'Te has dado de baja. La clase se ha añadido a tus clases por recuperar.'
+            : 'Te has dado de baja de la clase.', 'success');
+        // Recargar clases (el alumno ya no está en students) y refrescar el panel.
+        try {
+            const rows = await db.getClasses();
+            appState.classes = rows.map(c => db.convertClassFromDB(c));
+        } catch (e) { /* el panel se refresca igual */ }
+        await refreshClassHolds();
+        renderStudentDashboard();
+    } catch (error) {
+        console.error('Error al darse de baja:', error);
+        showToast(error.message || 'No se pudo procesar la baja', 'warning');
+    }
+}
+
 // ---- Lado monitor: badge, modal y resolución de solicitudes ----
 
 // Cuenta las solicitudes pendientes del monitor logueado y pinta el badge.
@@ -5040,7 +5313,15 @@ function closeSolicitudesModal() {
     closeModal('solicitudesModal');
 }
 
-// Lista las solicitudes pendientes del monitor con acciones Aceptar/Rechazar.
+// Etiqueta de clase con el aforo real: confirmados + retenidos por pagos en curso.
+function solicitudClassLabel(cls) {
+    if (!cls) return 'Clase';
+    const capacity = cls.maxCapacity || CONFIG.maxStudentsPerClass;
+    return `${formatDate(cls.date)} · ${cls.startTime}-${cls.endTime} (${occupancyOf(cls)}/${capacity})`;
+}
+
+// Lista las solicitudes del monitor: las pendientes de decidir (con acciones) y,
+// debajo, las ya aceptadas que están esperando a que el alumno pague.
 async function renderSolicitudesList() {
     const container = document.getElementById('solicitudesList');
     if (!container) return;
@@ -5048,9 +5329,16 @@ async function renderSolicitudesList() {
 
     const monitorId = getCurrentUser()?.id;
     let requests = [];
+    let awaitingPayment = [];
     try {
-        const rows = await db.getRequestsByMonitor(monitorId, 'pendiente');
-        requests = rows.map(r => db.convertRequestFromDB(r));
+        const [pendingRows, payingRows] = await Promise.all([
+            db.getRequestsByMonitor(monitorId, 'pendiente'),
+            db.getRequestsByMonitor(monitorId, 'aceptada_pendiente_pago').catch(() => []),
+        ]);
+        requests = pendingRows.map(r => db.convertRequestFromDB(r));
+        awaitingPayment = payingRows
+            .map(r => db.convertRequestFromDB(r))
+            .filter(r => r.paymentExpiresAt && new Date(r.paymentExpiresAt).getTime() > Date.now());
     } catch (error) {
         console.error('Error cargando solicitudes:', error);
         container.innerHTML = '<p class="student-empty">No se pudieron cargar las solicitudes.</p>';
@@ -5058,24 +5346,20 @@ async function renderSolicitudesList() {
     }
     appState.monitorRequests = requests;
 
-    if (requests.length === 0) {
+    if (requests.length === 0 && awaitingPayment.length === 0) {
         container.innerHTML = '<p class="student-empty">No tienes solicitudes pendientes.</p>';
         return;
     }
 
-    container.innerHTML = requests.map(r => {
+    const pendingHtml = requests.map(r => {
         const student = getStudentById(r.studentId);
-        const cls = getClassById(r.classId);
         const name = student ? student.name : 'Alumno';
         const levelLabel = (student && student.level != null) ? ` · Nivel ${student.level}` : '';
-        const classLabel = cls
-            ? `${formatDate(cls.date)} · ${cls.startTime}-${cls.endTime} (${(cls.students || []).length}/${cls.maxCapacity})`
-            : 'Clase';
         return `
             <div class="solicitud-row">
                 <div class="solicitud-info">
                     <div class="solicitud-name">${escapeHtml(name)}${levelLabel}</div>
-                    <div class="solicitud-class">${escapeHtml(classLabel)}</div>
+                    <div class="solicitud-class">${escapeHtml(solicitudClassLabel(getClassById(r.classId)))}</div>
                 </div>
                 <div class="solicitud-actions">
                     <button class="btn btn-sm btn-primary" onclick="acceptRequest('${escapeHtml(r.id)}')">Aceptar</button>
@@ -5083,9 +5367,31 @@ async function renderSolicitudesList() {
                 </div>
             </div>`;
     }).join('');
+
+    // Ya aceptadas: la plaza está retenida hasta que el alumno pague o expire el plazo.
+    // Sin botones: el monitor ya decidió, ahora la pelota está en el tejado del alumno.
+    const payingHtml = awaitingPayment.length === 0 ? '' : `
+        <div class="solicitud-group-title">Esperando pago</div>
+        ${awaitingPayment.map(r => {
+            const student = getStudentById(r.studentId);
+            const name = student ? student.name : 'Alumno';
+            const amount = r.price != null ? `€${Number(r.price).toFixed(2)} · ` : '';
+            return `
+            <div class="solicitud-row solicitud-waiting">
+                <div class="solicitud-info">
+                    <div class="solicitud-name">${escapeHtml(name)}</div>
+                    <div class="solicitud-class">${escapeHtml(solicitudClassLabel(getClassById(r.classId)))}</div>
+                </div>
+                <span class="pay-badge pending-pay">${escapeHtml(amount)}caduca en ${escapeHtml(formatTimeLeft(r.paymentExpiresAt))}</span>
+            </div>`;
+        }).join('')}`;
+
+    container.innerHTML = pendingHtml + payingHtml;
 }
 
-// Aceptar: añade al alumno a la clase (respetando aforo) y notifica al alumno.
+// Aceptar: NO inscribe al alumno. Pide al servidor una sesión de Stripe Checkout,
+// que retiene la plaza y envía el link de pago al alumno. El alumno solo entra en
+// la clase cuando el webhook de Stripe confirma el cobro (ver functions/api/).
 async function acceptRequest(requestId) {
     const request = appState.monitorRequests.find(r => r.id === requestId);
     if (!request) {
@@ -5094,60 +5400,24 @@ async function acceptRequest(requestId) {
         return;
     }
 
+    const student = getStudentById(request.studentId);
+    const name = student ? student.name : 'El alumno';
+
     try {
-        // Autoridad de aforo: releer la clase desde Supabase para evitar sobrecupo.
-        let cls = null;
-        try {
-            const fresh = await db.getClassById(request.classId);
-            cls = fresh ? db.convertClassFromDB(fresh) : getClassById(request.classId);
-        } catch (e) {
-            cls = getClassById(request.classId);
-        }
-        if (!cls) {
-            showToast('La clase ya no existe', 'error');
-            await refreshSolicitudesAfterChange();
-            return;
-        }
+        // El servidor rehace todas las validaciones (aforo con plazas retenidas,
+        // margen de 60 min, precio) y es quien decide: aquí solo mostramos el resultado.
+        const monitorId = getCurrentUser()?.id;
+        const { expiresAt } = await db.createCheckoutSession(requestId, monitorId);
 
-        const students = cls.students || [];
-        const student = getStudentById(request.studentId);
-
-        // Si ya está inscrito, resolver sin duplicar.
-        if (students.includes(request.studentId)) {
-            await db.updateRequestStatus(requestId, 'aceptada');
-            await notifyStudentResolution(request, 'solicitud_aceptada', cls, student, 'Ya estabas inscrito en la clase');
-            showToast('El alumno ya estaba inscrito');
-            await refreshSolicitudesAfterChange();
-            return;
-        }
-
-        // Clase llena -> auto-rechazo 'clase completa'.
-        if (students.length >= (cls.maxCapacity || 4)) {
-            await db.updateRequestStatus(requestId, 'rechazada', 'clase completa');
-            await notifyStudentResolution(request, 'solicitud_rechazada', cls, student, 'La clase está completa');
-            showToast('La clase está completa', 'warning');
-            await refreshSolicitudesAfterChange();
-            return;
-        }
-
-        // Hay hueco: inscribir al alumno (persiste + re-renderiza el calendario).
-        const newStudents = [...students, request.studentId];
-        await updateClass(request.classId, { students: newStudents }, true);
-        await db.updateRequestStatus(requestId, 'aceptada');
-        await notifyStudentResolution(request, 'solicitud_aceptada', cls, student, 'Tu solicitud ha sido aceptada');
-
-        // Si la clase queda completa, auto-rechazar el resto de pendientes.
-        if (newStudents.length >= (cls.maxCapacity || 4)) {
-            await autoRejectRemainingRequests(request.classId, requestId, cls);
-        }
-
-        showToast(`${student ? student.name : 'Alumno'} inscrito en la clase`);
-        await refreshSolicitudesAfterChange();
+        showToast(`Link de pago enviado a ${name} · tiene ${formatTimeLeft(expiresAt)} para pagar`);
     } catch (error) {
         console.error('Error al aceptar la solicitud:', error);
-        showToast('No se pudo aceptar la solicitud', 'error');
-        await refreshSolicitudesAfterChange();
+        // El mensaje viene del servidor: "clase completa", "sin margen para cobrar"...
+        showToast(error.message || 'No se pudo aceptar la solicitud', 'warning');
     }
+
+    await refreshClassHolds();
+    await refreshSolicitudesAfterChange();
 }
 
 // Rechazar manualmente una solicitud.
@@ -5172,22 +5442,8 @@ async function rejectRequest(requestId) {
     }
 }
 
-// Marca como 'clase completa' el resto de solicitudes pendientes de la clase.
-async function autoRejectRemainingRequests(classId, acceptedRequestId, cls) {
-    try {
-        const rows = await db.getPendingRequestsForClass(classId);
-        const remaining = rows
-            .map(r => db.convertRequestFromDB(r))
-            .filter(r => r.id !== acceptedRequestId);
-        for (const r of remaining) {
-            await db.updateRequestStatus(r.id, 'rechazada', 'clase completa');
-            const student = getStudentById(r.studentId);
-            await notifyStudentResolution(r, 'solicitud_rechazada', cls, student, 'La clase se ha completado');
-        }
-    } catch (error) {
-        console.warn('No se pudieron auto-rechazar las solicitudes restantes:', error);
-    }
-}
+// Nota: el auto-rechazo de las solicitudes restantes cuando una clase se llena lo
+// hace ahora el servidor, al confirmarse el pago (functions/_shared/fulfillment.js).
 
 // Crea la notificación de resultado para el alumno.
 async function notifyStudentResolution(request, type, cls, student, message) {
@@ -5252,20 +5508,66 @@ function unsubscribeFromNotifications() {
 }
 
 // Reacciona a una notificación entrante según el rol del usuario actual.
-function handleIncomingNotification(notif) {
+async function handleIncomingNotification(notif) {
     if (!notif) return;
 
-    if (notif.type === 'nueva_solicitud' && isMonitor()) {
-        // Actualiza el badge y, si el modal está abierto, refresca la lista.
-        refreshSolicitudesAfterChange();
-        showToast(notif.message || 'Nueva solicitud de inscripción');
+    if (isMonitor()) {
+        if (notif.type === 'nueva_solicitud') {
+            // Actualiza el badge y, si el modal está abierto, refresca la lista.
+            refreshSolicitudesAfterChange();
+            showToast(notif.message || 'Nueva solicitud de inscripción');
+            return;
+        }
+        // Un alumno ha pagado (solicitud_aceptada) o se ha dado de baja
+        // (solicitud_rechazada): en ambos casos cambia la ocupación de una clase,
+        // así que recargamos para que el calendario del monitor se actualice solo.
+        if (notif.type === 'solicitud_aceptada' || notif.type === 'solicitud_rechazada') {
+            try {
+                const rows = await db.getClasses();
+                appState.classes = rows.map(c => db.convertClassFromDB(c));
+            } catch (e) {
+                console.warn('No se pudieron recargar las clases:', e);
+            }
+            await refreshClassHolds();
+            renderCalendar();
+            await refreshSolicitudesAfterChange();
+            showToast(notif.message || (notif.type === 'solicitud_aceptada'
+                ? 'Un alumno ha confirmado su plaza'
+                : 'Un alumno se ha dado de baja'));
+        }
         return;
     }
 
-    if ((notif.type === 'solicitud_aceptada' || notif.type === 'solicitud_rechazada') && isUsuario()) {
-        const accepted = notif.type === 'solicitud_aceptada';
-        showToast(notif.message || (accepted ? 'Solicitud aceptada' : 'Solicitud rechazada'),
-                  accepted ? 'success' : 'warning');
+    if (isUsuario()) {
+        switch (notif.type) {
+            case 'pago_pendiente':
+                showToast(notif.message || 'Tu solicitud ha sido aceptada: ya puedes pagar tu plaza', 'success');
+                break;
+            case 'pago_confirmado':
+                showToast(notif.message || 'Pago confirmado, tu plaza está reservada', 'success');
+                break;
+            case 'pago_expirado':
+                showToast(notif.message || 'El pago no se completó y tu plaza se ha liberado', 'warning');
+                break;
+            case 'solicitud_aceptada':
+                showToast(notif.message || 'Solicitud aceptada', 'success');
+                break;
+            case 'solicitud_rechazada':
+                showToast(notif.message || 'Solicitud rechazada', 'warning');
+                break;
+            case 'plaza_libre':
+                showToast(notif.message || 'Se ha liberado una plaza en una clase de tu nivel 🎾', 'success');
+                break;
+            default:
+                return;
+        }
+        // Recargar clases: al liberarse/confirmarse una plaza cambia la ocupación,
+        // así que "Mis clases" y los "Avisos" deben recalcularse con datos frescos.
+        try {
+            const rows = await db.getClasses();
+            appState.classes = rows.map(c => db.convertClassFromDB(c));
+        } catch (e) { /* el panel se refresca igual */ }
+        await refreshClassHolds();
         renderStudentDashboard();
     }
 }

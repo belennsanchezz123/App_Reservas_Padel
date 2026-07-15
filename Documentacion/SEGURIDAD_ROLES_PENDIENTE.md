@@ -330,3 +330,65 @@ CREATE POLICY notifications_own ON notifications
 activo, Supabase Realtime respeta las políticas (cada quien solo recibe sus filas),
 lo que refuerza el modelo. `subscribeToNotifications` filtra además por
 `recipient_id` en el cliente.
+
+---
+
+## 8. Pagos con Stripe — lo que YA está protegido y lo que NO
+
+**Implementado (jul 2026):** cobro de la plaza al aceptar el monitor una solicitud.
+Código de servidor en `functions/` (Cloudflare Pages Functions), migración en
+`stripe_payments.sql`. Hoy en **modo test** de Stripe: no se mueve dinero real.
+
+### ✅ Lo que sí está bien protegido
+
+- **La clave secreta de Stripe y la `service_role` de Supabase nunca llegan al navegador**:
+  viven como variables de entorno de las Functions (`.dev.vars` en local, está en `.gitignore`;
+  panel de Cloudflare en producción). El cliente solo conoce la `anonKey`, como hasta ahora.
+- **El webhook verifica la firma de Stripe** (HMAC-SHA256 sobre el cuerpo crudo, con tolerancia
+  de 5 min contra *replays*): nadie puede fingir un "pago confirmado" llamando al endpoint.
+- **El importe lo fija el servidor** leyendo `classes.precio`; el cliente no lo envía, así que no
+  puede manipularlo para pagar menos.
+- **La confirmación del pago no depende del navegador**: la hace el webhook. Cerrar la pestaña
+  tras pagar no deja la plaza sin confirmar.
+
+### ⚠️ Lo que queda pendiente (consecuencia de tener RLS desactivada)
+
+1. **`class_requests` sigue sin RLS, y ahora contiene el estado del pago.** Con la `anonKey`,
+   cualquiera puede hacer desde la consola del navegador:
+   ```js
+   supabase.from('class_requests').update({ status: 'confirmada_pagada' }).eq('id', '<su-solicitud>')
+   ```
+   y colarse en la clase **sin pagar**. Es el mismo agujero que ya existía (§7), pero ahora tiene
+   consecuencia económica. **Al activar RLS (§7), impedir además que el alumno escriba `status`,
+   `price`, `paid_at` y `stripe_session_id`**: esas columnas solo debería tocarlas la `service_role`
+   (las Functions). Lo más simple es que el alumno solo pueda INSERT de solicitudes `pendiente`
+   y SELECT de las suyas, nunca UPDATE.
+
+2. **`POST /api/checkout/create` no autentica al monitor.** No hay verificación de sesión en el
+   servidor (la app no manda el JWT de Supabase Auth). Mitigación actual: el endpoint solo actúa
+   sobre una solicitud que ya existe y esté `pendiente`, comprueba que el `monitorId` recibido es el
+   monitor responsable de esa solicitud, y como mucho **genera un link de pago** (no inscribe a
+   nadie ni cobra). **Solución prevista:** enviar el `access_token` de Supabase Auth en la cabecera
+   `Authorization` y validarlo en la Function (`GET /auth/v1/user` con la anon key, o verificar el
+   JWT), comprobando que el usuario autenticado es de verdad el monitor de la solicitud.
+
+3. `/api/checkout/status` acepta cualquier `requestId`. Solo revela el estado de pago de una
+   solicitud (información poco sensible) y **no puede confirmar nada que Stripe no confirme**, pero
+   con el punto 2 resuelto conviene limitarlo también al alumno dueño de la solicitud.
+
+4. **`POST /api/enrollment/leave` (baja del alumno) tampoco autentica** (Fase 2). Recibe
+   `{ classId, studentId }` sin token, así que en teoría cualquiera podría dar de baja a otro alumno
+   de una clase. Mitigación actual: solo saca de la clase a un `studentId` que **ya estaba inscrito**,
+   respeta el corte de 24h, y como mucho libera una plaza (no cobra ni da acceso). El daño es un
+   sabotaje puntual, no económico. **Solución prevista (misma que el punto 2):** validar el
+   `access_token` de Supabase Auth y comprobar que el usuario autenticado es ese `studentId`.
+   La escritura en `classes` y `student_recoveries` va por `service_role` (correcto: el alumno no
+   tiene permiso directo por RLS).
+
+**Checklist antes de pasar Stripe a modo LIVE (dinero real):**
+- [ ] RLS activada en `class_requests` con las columnas de pago protegidas (punto 1). **Bloqueante.**
+- [ ] `/api/checkout/create` **y** `/api/enrollment/leave` autenticados (puntos 2 y 4). **Bloqueante.**
+- [ ] Webhook de producción dado de alta en el Dashboard de Stripe, con su `whsec_` propio
+      (el de `stripe listen` solo vale en local).
+- [ ] Claves `sk_live_…` en las variables de entorno de Cloudflare Pages, nunca en el repositorio.
+- [ ] Decidida la política de precios (`MANTENIMIENTO.md` §10).

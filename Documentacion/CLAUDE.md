@@ -14,9 +14,21 @@ Browser (HTML + CSS + JS vanilla)
         ├── config.js       ← Inicialización del cliente Supabase (URL + anonKey)
         └── supabase-init.js← Inicialización adicional de Supabase
                 │
-                ▼
-        Supabase (PostgreSQL + Auth email/contraseña)
+                ├──────────────────────────────┐
+                ▼                              ▼
+        Supabase                    functions/ (Cloudflare Pages Functions)
+        (PostgreSQL + Auth)         Pagos con Stripe. Único código de servidor
+                ▲                   del proyecto: guarda la clave secreta de
+                │                   Stripe y la service_role de Supabase, que
+                └───────────────────  NUNCA pueden estar en el navegador.
+                                            │
+                                            ▼
+                                     Stripe (Checkout + webhook)
 ```
+
+**Las Functions son la excepción a "todo es cliente"**: existen porque un cobro no se
+puede autorizar desde el navegador. Son ESM sobre `fetch` (sin SDK de Stripe ni bundler)
+y se despliegan solas con el mismo `git push` a Cloudflare Pages.
 
 Los scripts se cargan en orden estricto en `index.html`, cada uno con `?v=N`
 para romper la caché (subir N al editar el archivo — ver también la nota de
@@ -30,12 +42,17 @@ caché de iOS en `MANTENIMIENTO.md`):
 ## Comandos de desarrollo
 
 ```bash
-# Servidor local de desarrollo
+# Servidor local de desarrollo (solo el frontend)
 python -m http.server 8000
 # Acceder en http://localhost:8000
+
+# Si tocas los pagos (carpeta functions/), el servidor de Python NO las sirve:
+npx wrangler pages dev .          # frontend + functions en http://localhost:8788
+stripe listen --forward-to localhost:8788/api/stripe/webhook
 ```
 
-No hay build step, npm install, ni proceso de compilación. Abrir directamente en el navegador vía el servidor Python.
+Sigue sin haber build step ni compilación: `wrangler` solo hace falta para ejecutar
+las Functions de pago en local (en producción las despliega Cloudflare Pages solo).
 
 ## Estructura de archivos
 
@@ -48,11 +65,16 @@ App_Reservas_Padel/
 ├── supabase-init.js    # Script de inicialización adicional
 ├── tournaments.js      # Motor + UI de torneos (se carga tras app.js)
 ├── styles.css          # Estilos (todos)
+├── functions/          # Cloudflare Pages Functions (pagos con Stripe) — ver "Pagos"
+│   ├── _shared/        # stripe.js, supabase.js, time.js, fulfillment.js
+│   └── api/            # checkout/create.js, checkout/status.js, stripe/webhook.js
+├── .dev.vars.example   # Plantilla de secretos (copiar a .dev.vars, que está en .gitignore)
 ├── schema.sql          # Esquema base de las tablas
 ├── rls_security.sql    # RLS paso 1 (acceso total a autenticados)
 ├── rls_security_por_rol.sql # RLS paso 2 (políticas por rol)
 ├── student_role.sql    # Rol alumno: auth_user_id, student_recoveries, RLS
 ├── class_requests.sql  # Solicitudes de inscripción + notifications + Realtime
+├── stripe_payments.sql # Cobro al aceptar: classes.precio + estados de pago
 ├── matches.sql / tournaments.sql / seed_students.sql
 └── Documentacion/      # Toda la documentación .md
     ├── CLAUDE.md               # Este archivo
@@ -112,19 +134,69 @@ App_Reservas_Padel/
 
 Migración SQL en `student_role.sql` (añade `students.auth_user_id`, crea `student_recoveries` y políticas RLS por rol para el alumno).
 
-### class_requests (solicitudes de inscripción alumno → monitor)
+### class_requests (solicitudes de inscripción alumno → monitor, con cobro)
 | Campo | Tipo |
 |---|---|
 | id | uuid |
 | class_id | text → classes |
 | student_id | text → students |
 | monitor_id | text → monitors (monitor responsable, denormalizado) |
-| status | text (`pendiente` / `aceptada` / `rechazada`) |
+| status | text (ver estados abajo) |
 | reason | text (motivo del rechazo, ej. `clase completa`; null si no aplica) |
 | created_at | timestamptz (fecha de solicitud) |
 | resolved_at | timestamptz (fecha de resolución; null si pendiente) |
+| price | numeric(6,2) (importe **congelado** al aceptar; si luego cambia `classes.precio`, no afecta) |
+| stripe_session_id | text (único; da idempotencia al webhook) |
+| checkout_url | text (link de pago que abre el alumno) |
+| payment_expires_at | timestamptz (plazo dinámico de pago) |
+| paid_at | timestamptz (null hasta que Stripe confirma el cobro) |
 
-El alumno solicita plaza en una clase de su nivel con hueco (desde la sección "🔔 Avisos"); se crea una fila `pendiente`. El **monitor responsable** la acepta/rechaza desde su apartado "Solicitudes". Índice único parcial `(class_id, student_id) WHERE status='pendiente'` evita duplicados. Al aceptar y **llenarse** la clase, el resto de solicitudes pendientes de esa clase se auto-rechazan con `reason='clase completa'`. Migración en `class_requests.sql`.
+**Estados** (`pendiente` → aceptación del monitor → pago):
+
+```
+pendiente ──(monitor acepta: reserva atómica + sesión Stripe)──> aceptada_pendiente_pago
+                                                         ├─ pago ok     ──> confirmada_pagada
+                                                         └─ pago expira ──> cancelada_por_impago
+monitor rechaza / plaza ya cubierta ─────────────────────────────────────> rechazada
+alumno se da de baja (clase pagada, ≥24h) ───────────────────────────────> cancelada_por_alumno
+```
+
+**Aceptar ya NO inscribe al alumno.** Al aceptar se crea una sesión de Stripe Checkout y la
+solicitud queda como `aceptada_pendiente_pago`: eso es un **"hold"** que RETIENE la plaza sin
+tocar `classes.students`. El alumno solo entra en la clase cuando el pago se confirma.
+
+**Aforo real** = `classes.students` + solicitudes en `aceptada_pendiente_pago` con
+`payment_expires_at > now()` (`occupancyOf()` en `app.js`, `getOccupancy()` en las Functions).
+Un hold caducado no retiene nada, así que **la plaza se libera sola** sin ningún job programado.
+
+**Plazo de pago dinámico** = `min(2h, tiempo hasta la clase − 30 min de margen)`. Ese plazo ES
+el `expires_at` de la sesión de Stripe: es Stripe quien caduca el pago, no un temporizador propio.
+El tope estándar (`STANDARD_WINDOW_MS` en `functions/_shared/time.js`) se fijó en **2 h** para no
+retener plazas demasiado tiempo sin pagar; las clases cercanas lo acortan solas hasta el mínimo de
+Stripe (30 min). Subirlo/bajarlo es cambiar esa sola constante.
+
+**Corte de 60 minutos**: no se puede solicitar una clase que empieza en menos de 1 hora. Sale de
+sumar los 30 min de margen antes de la clase + los **30 min mínimos que Stripe exige** que viva una
+sesión de Checkout (su `expires_at` debe estar entre 30 min y 24 h). Constante `MIN_LEAD_MINUTES`.
+
+Índice único parcial `(class_id, student_id) WHERE status IN ('pendiente','aceptada_pendiente_pago')`
+evita duplicados también mientras el pago está en curso. Al confirmarse un pago que **llena** la
+clase, el resto de solicitudes pendientes se auto-rechazan con `reason='plaza ya cubierta'` (lo hace el
+servidor, en `functions/_shared/fulfillment.js`). Migraciones en `class_requests.sql` + `stripe_payments.sql`.
+
+**Reserva atómica (antisobrecupo).** La aceptación NO valida el aforo con un read-then-write (que
+permitía sobrecupo si dos monitores aceptaban a la vez): lo hace la función Postgres
+`reserve_class_spot(request_id, expires_at)` (`race_and_cancellation.sql`), que bloquea la fila de la
+clase (`SELECT ... FOR UPDATE`), recuenta alumnos + holds vivos **ya con el lock**, y solo marca el
+hold si queda hueco. Devuelve `ok` | `full` | `gone`. Es el **único uso de RPC de Postgres** del
+proyecto; se invoca desde `create.js` con la `service_role`. El "segundo que pierde" recibe
+`reason='plaza ya cubierta'` + notificación.
+
+**Baja del alumno** (estado `cancelada_por_alumno`): el alumno puede darse de baja de una clase futura
+solo con **≥24h** de antelación (endpoint `functions/api/enrollment/leave.js`; el alumno no tiene
+permiso de escritura, va por servidor). Libera la plaza; si la clase estaba **pagada** (había una
+solicitud `confirmada_pagada`), en vez de reembolsar se le crea una **clase por recuperar**
+(`student_recoveries`) y su solicitud pasa a `cancelada_por_alumno`. Migración en `race_and_cancellation.sql`.
 
 ### notifications (bus genérico de notificaciones, reutilizable)
 | Campo | Tipo |
@@ -132,7 +204,7 @@ El alumno solicita plaza en una clase de su nivel con hueco (desde la sección "
 | id | uuid |
 | recipient_id | text (id de student o monitor) |
 | recipient_role | text (`usuario` / `monitor`) |
-| type | text (`nueva_solicitud` / `solicitud_aceptada` / `solicitud_rechazada`) |
+| type | text (`nueva_solicitud` / `solicitud_aceptada` / `solicitud_rechazada` / `pago_pendiente` / `pago_confirmado` / `pago_expirado` / `plaza_libre`) |
 | request_id | uuid → class_requests |
 | class_id | text |
 | message | text |
@@ -157,8 +229,22 @@ Bus de avisos reutilizable para futuros flujos. Es además el **canal de Supabas
 | monitor_name | text |
 | comments | text |
 | paid | boolean (pago de la clase al monitor, lo marca el coordinador) |
+| precio | numeric(6,2), default 10.00 (lo que paga el alumno por confirmar su plaza) |
 
 En la app (`db.js.convertClassFromDB`) `start_at`/`end_at` se convierten a `startTime`/`endTime` (HH:MM) y `date` (YYYY-MM-DD).
+
+**Fecha/día de la clase: la fuente fiable es `start_at`, NO la columna `date`.** `convertClassFromDB`
+deriva `date` y `day` de la parte de fecha de `start_at` (que se guarda como hora de pared local, así
+que su substring es el día local correcto). La columna `date` es `timestamptz` y, si una clase se
+guardó a **medianoche** local, su representación en UTC cae en el **día anterior** (bug off-by-one:
+p. ej. jueves 16 a las 00:00 CEST se almacena como `2026-07-15T22:00:00Z`), lo que hacía que el modal
+de solicitudes mostrara un día menos que el calendario. El servidor de pagos (`functions/_shared/time.js`,
+`classStartMs`) usa el mismo criterio para anclar el plazo de pago al día correcto.
+
+`precio` es editable por clase en el formulario de clase (campo `#classPrecio`, por defecto
+`DEFAULT_CLASS_PRICE = 10`). **La política de precios definitiva está PENDIENTE de decidir**
+(¿fijo?, ¿por nivel?, ¿por tipo de clase?): de momento es un campo manual. No confundir con
+`paid`, que es el pago de la clase **al monitor** y no tiene importe.
 
 ### matches (partidos por nivel, estilo Playtomic)
 | Campo | Tipo |
@@ -187,18 +273,46 @@ Gestión de torneos en una pestaña ("Torneos") del panel de Recepción. Motor +
 
 Motor (`tournaments.js`): `computeGroupPlan(n, format)` calcula grupos/clasificados para llegar a un cuadro potencia de 2 (2 clasificados/grupo, grupos ≥3 parejas); `bracketSeedOrder` genera el orden de cruces; al registrar resultado el ganador avanza solo (`advanceBracketWinner`) y, al cerrarse todos los grupos, se rellena la 1ª ronda del cuadro (`tryResolveGroups`). **Pendiente Fase 2**: colocación manual con drag & drop (hoy "manual" = orden de inscripción).
 
+## Pagos con Stripe (cobro al aceptar una solicitud)
+
+Único código de servidor del proyecto: `functions/` (Cloudflare Pages Functions). Está en
+**modo test** (`sk_test_…`). Migraciones: `stripe_payments.sql` + `race_and_cancellation.sql`.
+
+| Endpoint | Cuándo | Qué hace |
+|---|---|---|
+| `POST /api/checkout/create` | El monitor pulsa "Aceptar" | Corte de 60 min + precio, **reserva atómica** de la plaza (RPC `reserve_class_spot`, sin sobrecupo), crea la sesión de Stripe con el `expires_at` dinámico y notifica al alumno. Si la plaza ya no está → `plaza ya cubierta` |
+| `POST /api/stripe/webhook` | Stripe nos avisa | **Fuente de verdad del cobro.** `checkout.session.completed` → confirma la plaza; `checkout.session.expired` → la libera |
+| `GET /api/checkout/status` | El alumno vuelve de Stripe (`?pago=ok`) | Red de seguridad: pregunta el estado a Stripe por si el webhook aún no ha llegado |
+| `POST /api/enrollment/leave` | El alumno pulsa "Darme de baja" | Baja con **≥24h** de antelación: saca al alumno de `classes.students`; si la clase estaba pagada → **clase por recuperar** + solicitud `cancelada_por_alumno`. Si estaba llena, avisa `plaza_libre` a los alumnos del nivel (`_shared/eligibility.js`) |
+
+Claves del diseño:
+
+- **El webhook, no la redirección**, confirma el pago: si el alumno paga y cierra la pestaña, su
+  plaza se confirma igual. Su firma se verifica con HMAC-SHA256 sobre el cuerpo **crudo**
+  (`constructEvent` en `_shared/stripe.js`).
+- **Idempotencia**: `confirmPayment`/`cancelForNonPayment` (`_shared/fulfillment.js`) pueden ejecutarse
+  varias veces sin duplicar al alumno. Da igual quién llegue primero, el webhook o `status`, ni que
+  Stripe reintente el evento.
+- **Zona horaria**: las Functions corren en UTC pero las clases se guardan en hora de pared española.
+  `_shared/time.js` hace la conversión Madrid → UTC explícitamente; sin ella, en verano (CEST) todos
+  los plazos saldrían desfasados 2 horas.
+- **Secretos**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_URL`
+  y `APP_BASE_URL` viven en variables de entorno (Cloudflare Pages → Settings → Environment variables;
+  en local, `.dev.vars`, que está en `.gitignore`). **Jamás en el código ni en el repositorio.**
+
 ## Roles de usuario
 
 Los permisos viven en el array `monitors.permissions` (`coordinador` / `monitor` / `recepcion`). El rol `usuario` (alumno) **no** está en `monitors`: se deduce en el login (`resolveUserFromAuth` en `app.js`) cuando el usuario autenticado no tiene fila en `monitors` pero sí en `students` (por `students.auth_user_id`).
 
 - **Coordinador**: ve todos los monitores y sus clases, puede exportar a Excel. Su panel tiene dos pestañas: "Monitores" y "Gestión de clase" (historial de pagos de alumnos y retrasos), ver `switchCoordTab`/`renderGestionClase`.
-- **Monitor**: gestiona únicamente sus propias clases y alumnos. Desde el detalle de una clase puede "marcar ausencia" de un alumno (`markAbsence`), que genera una clase por recuperar. En su vista de calendario tiene el botón **"📩 Solicitudes"** (con contador de pendientes) que abre el apartado de solicitudes de inscripción de sus clases: acepta (`acceptRequest`) o rechaza (`rejectRequest`). Al aceptar, el alumno se añade a `classes.students`, el calendario se refresca y el alumno recibe notificación; si la clase se llena, el resto de solicitudes de esa clase se auto-rechazan ("clase completa").
+- **Monitor**: gestiona únicamente sus propias clases y alumnos. Desde el detalle de una clase puede "marcar ausencia" de un alumno (`markAbsence`), que genera una clase por recuperar. En su vista de calendario tiene el botón **"📩 Solicitudes"** (con contador de pendientes) que abre el apartado de solicitudes de inscripción de sus clases: acepta (`acceptRequest`) o rechaza (`rejectRequest`). **Aceptar no inscribe al alumno: genera su link de pago** (Stripe Checkout) y retiene la plaza; el alumno aparece en el calendario cuando paga (aviso en vivo por Realtime). Bajo las solicitudes pendientes, el modal lista las que están "Esperando pago" con su cuenta atrás. El aforo que ve (`2+1/4`) ya incluye las plazas retenidas.
 - **Recepción**: gestión de pagos, caja, partidos, categorías y torneos.
 - **Usuario (alumno)**: `permissions: ['usuario']`, `currentUser.studentId` = `students.id`. Panel propio (`showStudentView`/`renderStudentDashboard`) con:
+  - **Mis clases** (próximas): clases futuras donde el alumno está inscrito. Cada una, si faltan **≥24h**, tiene un botón **"Darme de baja"** (`leaveClass` → `POST /api/enrollment/leave`); con menos de 24h no se puede cancelar. Si la clase estaba pagada, la baja genera una clase por recuperar.
   - Cuotas pagadas y pendientes (tabla `student_payments`).
-  - Clases por recuperar (tabla `student_recoveries`, filas con `recovered_at` nulo).
-  - Avisos de clases libres que "cuadran" con su nivel: clases futuras, no cerradas (`is_completed=false`), con 1–3 alumnos (sin llegar a `max_capacity`) y con el nivel del alumno dentro de ±0,5 del nivel medio de los inscritos (`findFreeClassesForStudent`). El estado "visto" se guarda en `localStorage`. Cada aviso tiene un botón **"Solicitar plaza"** (`requestClassEnrollment`) que crea una solicitud pendiente (tabla `class_requests`) y notifica al monitor.
-  - **Mis solicitudes**: estado de las inscripciones pedidas (pendiente / aceptada / rechazada + motivo). Es la notificación visible del resultado; el alumno recibe además un aviso en vivo (Supabase Realtime) al aceptarse/rechazarse. Si le rechazan, puede solicitar otra clase de su nivel.
+  - Clases por recuperar (tabla `student_recoveries`, filas con `recovered_at` nulo). Se generan cuando el monitor marca ausencia (`markAbsence`) o cuando el alumno se da de baja de una clase que ya había pagado.
+  - Avisos de clases libres que "cuadran" con su nivel: clases no cerradas (`is_completed=false`), que empiecen **a más de 60 minutos vista** (`MIN_LEAD_MINUTES`, para que dé tiempo a cobrar), con 1–3 alumnos (aforo con holds, sin llegar a `max_capacity`) y con el nivel del alumno dentro de ±0,5 del nivel medio de los inscritos (`findFreeClassesForStudent`). El estado "visto" se guarda en `localStorage`. Cada aviso tiene un botón **"Solicitar plaza"** (`requestClassEnrollment`) que crea una solicitud pendiente (tabla `class_requests`) y notifica al monitor.
+  - **Mis solicitudes**: estado de las inscripciones pedidas y **donde el alumno paga**. Si el monitor la aceptó, la fila muestra "Pendiente de pago" con el importe, la cuenta atrás del plazo y un botón **"Pagar ahora"** que abre Stripe Checkout. Al pagar pasa a "Confirmada"; si se le pasa el plazo, a "Sin pagar" (la plaza se liberó y puede volver a solicitar). Todos los cambios le llegan en vivo por Supabase Realtime (`pago_pendiente` / `pago_confirmado` / `pago_expirado`).
   - **Bloqueo por impago**: si hay una cuota mensual (`period`, sin `class_id`) sin pagar de un mes anterior, o del mes actual pasado el día 5, se muestra una pantalla de bloqueo en vez del panel (`findBlockingUnpaidQuota`).
 
 ## Funcionalidades principales
@@ -210,6 +324,9 @@ Los permisos viven en el array `monitors.permissions` (`coordinador` / `monitor`
 - Exportar datos a Excel (SheetJS/xlsx via CDN)
 - Login con Supabase Auth (email/contraseña)
 - Solicitudes de inscripción a clase (alumno → monitor) con aprobación, notificaciones en ambos sentidos y actualización en vivo vía Supabase Realtime (tablas `class_requests` + `notifications`)
+- **Cobro de la plaza con Stripe Checkout** al aceptar el monitor la solicitud (modo test). La plaza queda retenida hasta que el alumno paga; si no paga en plazo, se libera sola. Ver "Pagos con Stripe"
+- **Reserva atómica antisobrecupo**: la última plaza nunca se asigna dos veces aunque se acepten dos solicitudes a la vez (RPC `reserve_class_spot`); al que pierde le llega "plaza ya cubierta"
+- **Baja del alumno** (≥24h) con conversión a clase por recuperar si estaba pagada, y **aviso de plaza libre** a los alumnos del nivel (reutiliza los "Avisos", sin lista de espera propia)
 
 ## Librerías CDN
 
@@ -222,8 +339,9 @@ No se usa ningún framework frontend (React, Vue, Angular, etc.) ni gestor de pa
 
 ## Convenciones de código
 
-- **Sin bundler**: no usar webpack, vite, parcel ni ningún build step.
+- **Sin bundler**: no usar webpack, vite, parcel ni ningún build step. Las Functions de `functions/` también son ESM plano sobre `fetch` (sin SDK de Stripe ni de Supabase): mantenerlo así.
 - **Sin npm scripts de build**: el proyecto no tiene `package.json` de producción.
+- **Secretos**: nada de claves secretas en el navegador. La clave secreta de Stripe y la `service_role` de Supabase solo existen como variables de entorno de las Functions. En el cliente, únicamente la `anonKey`.
 - **Estado global**: toda la aplicación comparte `window.appState`. No crear estados locales que dupliquen esta estructura.
 - **Conversión de nombres**: `db.js` es el único punto donde se hace la conversión `camelCase` (app) ↔ `snake_case` (Supabase). Respetar este patrón al añadir nuevas columnas o campos.
 - **Orden de carga de scripts**: respetar el orden en `index.html` o la app no arranca (dependencias globales síncronas).

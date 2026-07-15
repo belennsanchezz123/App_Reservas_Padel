@@ -2005,6 +2005,15 @@ form {
     font-size: var(--font-size-sm);
 }
 
+/* Texto de ayuda bajo un campo (p. ej. el precio de la clase) */
+.form-hint {
+    display: block;
+    margin-top: var(--spacing-xs);
+    font-size: var(--font-size-sm);
+    color: var(--gray-500);
+    font-weight: 400;
+}
+
 .form-group input,
 .form-group select,
 .form-group textarea {
@@ -5522,9 +5531,54 @@ form {
     flex-shrink: 0;
 }
 
+/* Solicitudes ya aceptadas cuya plaza está retenida esperando el pago del alumno */
+.solicitud-group-title {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: var(--spacing-md) 0 var(--spacing-sm);
+}
+.solicitud-waiting {
+    background: #fffbeb;
+    border: 1px dashed #fcd34d;
+}
+
+/* Estado "pendiente de pago" (alumno y monitor) */
+.pay-badge.pending-pay {
+    background: #ffedd5;
+    color: #c2410c;
+}
+
+/* Panel del alumno: "Mis clases" — texto cuando ya no se puede cancelar (<24h) */
+.myclass-locked {
+    font-size: var(--font-size-sm);
+    color: var(--gray-400);
+    white-space: nowrap;
+}
+
+/* Panel del alumno: pago de la plaza en "Mis solicitudes" */
+.request-right {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex-shrink: 0;
+}
+.request-pay-info {
+    font-size: var(--font-size-sm);
+    color: var(--gray-600);
+}
+.request-pay-btn {
+    text-decoration: none;
+    white-space: nowrap;
+}
+
 @media (max-width: 768px) {
     .solicitud-row { flex-direction: column; align-items: stretch; }
     .solicitud-actions { justify-content: flex-end; }
+    .request-row { flex-wrap: wrap; }
+    .request-right { width: 100%; justify-content: flex-end; }
 }
 
 /* ==========================================

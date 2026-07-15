@@ -292,6 +292,7 @@ const db = {
                     monitor_id: classData.monitorId,
                     monitor_name: classData.monitorName,
                     comments: classData.comments || null,
+                    precio: classData.precio != null ? classData.precio : undefined,
                     recurring_group_id: classData.recurringGroupId || null
                 }], { onConflict: 'monitor_id,start_at' })
                 .select()
@@ -326,6 +327,7 @@ const db = {
             if (updates.monitorName !== undefined) dbUpdates.monitor_name = updates.monitorName;
             if (updates.comments !== undefined) dbUpdates.comments = updates.comments;
             if (updates.paid !== undefined) dbUpdates.paid = updates.paid;
+            if (updates.precio !== undefined) dbUpdates.precio = updates.precio;
 
             // UPDATE por clave primaria (id). Antes se usaba un upsert con
             // onConflict:'monitor_id,start_at'; al enviar solo unos campos (p. ej.
@@ -395,6 +397,7 @@ const db = {
                     monitor_id: c.monitorId,
                     monitor_name: c.monitorName,
                     comments: c.comments || null,
+                    precio: c.precio != null ? c.precio : undefined,
                     recurring_group_id: c.recurringGroupId || null,
                 };
             });
@@ -426,13 +429,19 @@ const db = {
             ? String(dbClass.end_time).substring(0, 5)
             : String(dbClass.end_at || '').substring(11, 16);
 
-        // date y day: usar columnas directas cuando existen para evitar conversión de zona horaria
-        const dateStr = dbClass.date
-            ? String(dbClass.date).substring(0, 10)
-            : String(dbClass.start_at || '').substring(0, 10);
+        // Fecha del día: la fuente FIABLE es start_at, no el campo `date`.
+        // start_at se guarda como hora de pared local (toLocaleDateString('sv') + start_time),
+        // así que su parte de fecha (substring, sin parsear a Date) es el día local correcto.
+        // El campo `date` es timestamptz: si la clase se guardó a MEDIANOCHE local, su
+        // representación en UTC cae en el día ANTERIOR (bug off-by-one, p. ej. jueves 16 a las
+        // 00:00 CEST -> "2026-07-15T22:00:00Z"), por lo que no sirve como día de la clase.
+        const dateStr = dbClass.start_at
+            ? String(dbClass.start_at).substring(0, 10)
+            : String(dbClass.date || '').substring(0, 10);
         const startHour = parseInt(startTime.split(':')[0], 10);
         const dateObj = new Date(`${dateStr}T${startTime}:00`);
-        const day = dbClass.day || _DAYS_ES[(dateObj.getDay() + 6) % 7];
+        // day derivado de la fecha ya corregida, para que nunca discrepe del día real.
+        const day = _DAYS_ES[(dateObj.getDay() + 6) % 7] || dbClass.day;
 
         return {
             id: dbClass.id,
@@ -448,6 +457,7 @@ const db = {
             monitorName: dbClass.monitor_name,
             comments: dbClass.comments || '',
             paid: dbClass.paid || false,
+            precio: dbClass.precio != null ? Number(dbClass.precio) : null,
             recurringGroupId: dbClass.recurring_group_id || null
         };
     },
@@ -1177,6 +1187,39 @@ const db = {
         }
     },
 
+    // Solicitudes con un pago en curso que todavía retienen plaza ("holds").
+    // Una solicitud cuyo plazo ya venció no retiene nada: la plaza vuelve a estar
+    // libre aunque el webhook de expiración de Stripe aún no haya llegado.
+    async getActiveHolds() {
+        try {
+            const { data, error } = await supabase
+                .from('class_requests')
+                .select('*')
+                .eq('status', 'aceptada_pendiente_pago')
+                .gt('payment_expires_at', new Date().toISOString());
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting active holds:', error);
+            return [];
+        }
+    },
+
+    async getRequestById(id) {
+        try {
+            const { data, error } = await supabase
+                .from('class_requests')
+                .select('*')
+                .eq('id', id)
+                .maybeSingle();
+            if (error) throw error;
+            return data || null;
+        } catch (error) {
+            console.error('Error getting request by id:', error);
+            return null;
+        }
+    },
+
     convertRequestFromDB(r) {
         if (!r) return null;
         return {
@@ -1188,7 +1231,52 @@ const db = {
             reason: r.reason || null,
             createdAt: r.created_at,
             resolvedAt: r.resolved_at || null,
+            // Datos del cobro (Stripe)
+            price: r.price != null ? Number(r.price) : null,
+            stripeSessionId: r.stripe_session_id || null,
+            checkoutUrl: r.checkout_url || null,
+            paymentExpiresAt: r.payment_expires_at || null,
+            paidAt: r.paid_at || null,
         };
+    },
+
+    // ==========================================
+    // PAGOS STRIPE (Cloudflare Pages Functions, no Supabase)
+    // La clave secreta de Stripe vive solo en el servidor: el navegador se limita
+    // a pedir el link de pago y a consultar el estado.
+    // ==========================================
+
+    // El monitor acepta -> el servidor crea la sesión de Checkout y retiene la plaza.
+    async createCheckoutSession(requestId, monitorId) {
+        const res = await fetch('/api/checkout/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId, monitorId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'No se pudo generar el link de pago');
+        return data;
+    },
+
+    // El alumno vuelve de Stripe: confirma el estado real por si el webhook aún no llegó.
+    async getCheckoutStatus(requestId) {
+        const res = await fetch(`/api/checkout/status?requestId=${encodeURIComponent(requestId)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'No se pudo consultar el estado del pago');
+        return data;
+    },
+
+    // El alumno se da de baja de una clase (>=24h). Si estaba pagada, el servidor
+    // le genera una clase por recuperar. Devuelve { ok, recovery }.
+    async leaveClass(classId, studentId) {
+        const res = await fetch('/api/enrollment/leave', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ classId, studentId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'No se pudo procesar la baja');
+        return data;
     },
 
     // ==========================================
