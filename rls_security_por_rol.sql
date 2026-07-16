@@ -32,7 +32,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
-  SELECT id FROM public.monitors WHERE auth_user_id = auth.uid() LIMIT 1;
+  SELECT id FROM public.personal WHERE auth_user_id = auth.uid() LIMIT 1;
 $$;
 
 -- TRUE si el usuario autenticado es coordinador.
@@ -44,7 +44,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM public.monitors
+    SELECT 1 FROM public.personal
     WHERE auth_user_id = auth.uid() AND role = 'coordinador'
   );
 $$;
@@ -53,7 +53,7 @@ $$;
 -- ------------------------------------------------------------------
 -- 2) Quitar las políticas simples del paso 1.
 -- ------------------------------------------------------------------
-DROP POLICY IF EXISTS "auth_all_monitors"           ON public.monitors;
+DROP POLICY IF EXISTS "auth_all_monitors"           ON public.personal;
 DROP POLICY IF EXISTS "auth_all_students"           ON public.students;
 DROP POLICY IF EXISTS "auth_all_classes"            ON public.classes;
 DROP POLICY IF EXISTS "auth_all_matches"            ON public.matches;
@@ -93,24 +93,24 @@ CREATE POLICY "classes_delete" ON public.classes
 --    el coordinador puede gestionar todas.
 --    (Solo coordinador puede crear/borrar monitores.)
 -- ------------------------------------------------------------------
-DROP POLICY IF EXISTS "monitors_select" ON public.monitors;
-CREATE POLICY "monitors_select" ON public.monitors
+DROP POLICY IF EXISTS "monitors_select" ON public.personal;
+CREATE POLICY "monitors_select" ON public.personal
   FOR SELECT TO authenticated
   USING ( public.is_coordinator() OR auth_user_id = auth.uid() );
 
-DROP POLICY IF EXISTS "monitors_update" ON public.monitors;
-CREATE POLICY "monitors_update" ON public.monitors
+DROP POLICY IF EXISTS "monitors_update" ON public.personal;
+CREATE POLICY "monitors_update" ON public.personal
   FOR UPDATE TO authenticated
   USING ( public.is_coordinator() OR auth_user_id = auth.uid() )
   WITH CHECK ( public.is_coordinator() OR auth_user_id = auth.uid() );
 
-DROP POLICY IF EXISTS "monitors_insert" ON public.monitors;
-CREATE POLICY "monitors_insert" ON public.monitors
+DROP POLICY IF EXISTS "monitors_insert" ON public.personal;
+CREATE POLICY "monitors_insert" ON public.personal
   FOR INSERT TO authenticated
   WITH CHECK ( public.is_coordinator() );
 
-DROP POLICY IF EXISTS "monitors_delete" ON public.monitors;
-CREATE POLICY "monitors_delete" ON public.monitors
+DROP POLICY IF EXISTS "monitors_delete" ON public.personal;
+CREATE POLICY "monitors_delete" ON public.personal
   FOR DELETE TO authenticated
   USING ( public.is_coordinator() );
 

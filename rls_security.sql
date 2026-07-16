@@ -10,7 +10,7 @@
 -- ==========================================
 
 -- 1) Activar RLS en todas las tablas
-ALTER TABLE public.monitors            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.personal            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.students            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.classes             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.matches             ENABLE ROW LEVEL SECURITY;
@@ -22,8 +22,8 @@ ALTER TABLE public.tournament_matches  ENABLE ROW LEVEL SECURITY;
 --    USING controla SELECT/UPDATE/DELETE; WITH CHECK controla INSERT/UPDATE.
 --    DROP previo para que el script sea reejecutable sin errores.
 
-DROP POLICY IF EXISTS "auth_all_monitors"           ON public.monitors;
-CREATE POLICY "auth_all_monitors"           ON public.monitors
+DROP POLICY IF EXISTS "auth_all_monitors"           ON public.personal;
+CREATE POLICY "auth_all_monitors"           ON public.personal
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "auth_all_students"           ON public.students;

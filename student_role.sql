@@ -66,7 +66,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
-  SELECT id FROM public.monitors WHERE auth_user_id = auth.uid() LIMIT 1;
+  SELECT id FROM public.personal WHERE auth_user_id = auth.uid() LIMIT 1;
 $$;
 
 -- TRUE si el usuario autenticado es coordinador.
@@ -78,7 +78,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM public.monitors
+    SELECT 1 FROM public.personal
     WHERE auth_user_id = auth.uid() AND role = 'coordinador'
   );
 $$;

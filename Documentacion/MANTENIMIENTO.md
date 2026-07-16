@@ -240,3 +240,30 @@ manual **a propósito** para no bloquear la implementación del cobro.
 calcularlo al crear la clase. El resto del flujo no cambia: `checkout/create.js` ya lee el
 importe de `classes.precio` y lo **congela** en `class_requests.price` al aceptar, así que
 cambiar la política no altera los pagos ya acordados.
+
+---
+
+## 11. Renombrado `monitors` → `personal`: solo se hizo la tabla, no las columnas/funciones
+
+**Estado actual:** la tabla `monitors` se renombró a `personal` (contiene todo el personal:
+coordinador/monitor/recepción; ver `rename_monitors_to_personal.sql`). Se hizo la **opción A**
+(renombrado de la colección): tabla, `.from('personal')`, `appState.personal` y la capa
+`db.*Personal*`. Se **conservaron a propósito**: la columna `classes.monitor_id` /
+`class_requests.monitor_id`, las funciones RLS `current_monitor_id()` / `is_coordinator()` /
+`current_staff_role()` y las variables/funciones JS `monitorId`, `monitorName`, `getMonitorById()`,
+`addMonitor/updateMonitor/deleteMonitor` (UI). El valor de rol `'monitor'` sigue siendo un rol válido y NO se toca.
+
+**Qué NO es problema:** funciona y es coherente. `monitor_id` es semánticamente correcto (una
+clase la imparte un monitor) y evitó el riesgo alto de renombrar una columna de la que dependen
+todas las lecturas/escrituras de clases.
+
+**Qué queda "a medias" (solo estético):** una tabla `personal` con FK `monitor_id` y una función
+`current_monitor_id()` que en realidad devuelve un id de `personal`. Puede despistar al leer el código.
+
+**Cuándo abordarlo (renombrado completo, opción B):** solo si molesta la incoherencia, y **después**
+de tener RLS activado y estable — nunca a la vez. Implica: `ALTER TABLE ... RENAME COLUMN monitor_id
+TO personal_id` en `classes` y `class_requests`, renombrar `current_monitor_id()` → `current_personal_id()`
+(cascada a **todas** las políticas de **todos** los `.sql`), y `monitorId`/`monitorName` en `app.js`.
+Alto churn y coordinación `ALTER` + despliegue. Mantener el rol `'monitor'` intacto en cualquier caso.
+
+**Esfuerzo estimado:** alto (renombrar columna en producción coordinado con el código + reescribir políticas).

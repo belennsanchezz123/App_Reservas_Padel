@@ -4,7 +4,7 @@
 -- ==========================================
 
 -- Tabla de Monitores
-CREATE TABLE IF NOT EXISTS monitors (
+CREATE TABLE IF NOT EXISTS personal (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS classes (
   max_capacity INTEGER DEFAULT 4,
   status TEXT DEFAULT 'active',
   is_completed BOOLEAN DEFAULT FALSE,
-  monitor_id TEXT REFERENCES monitors(id) ON DELETE CASCADE,
+  monitor_id TEXT REFERENCES personal(id) ON DELETE CASCADE,
   monitor_name TEXT,
   comments TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -52,7 +52,7 @@ ADD COLUMN IF NOT EXISTS comments TEXT;
 CREATE INDEX IF NOT EXISTS idx_classes_date ON classes(date);
 CREATE INDEX IF NOT EXISTS idx_classes_monitor ON classes(monitor_id);
 CREATE INDEX IF NOT EXISTS idx_students_name ON students(name);
-CREATE INDEX IF NOT EXISTS idx_monitors_name ON monitors(name);
+CREATE INDEX IF NOT EXISTS idx_personal_name ON personal(name);
 
 -- Row Level Security (RLS)
 -- La seguridad se configura en rls_security.sql (activa RLS + políticas
@@ -61,6 +61,6 @@ CREATE INDEX IF NOT EXISTS idx_monitors_name ON monitors(name);
 -- Ver rls_security.sql y rls_security_por_rol.sql.
 
 -- Comentarios en las tablas
-COMMENT ON TABLE monitors IS 'Monitores de clases de pádel';
+COMMENT ON TABLE personal IS 'Personal del club (coordinador / monitor / recepción)';
 COMMENT ON TABLE students IS 'Estudiantes registrados';
 COMMENT ON TABLE classes IS 'Clases programadas';

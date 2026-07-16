@@ -72,7 +72,10 @@ App_Reservas_Padel/
 ├── schema.sql          # Esquema base de las tablas
 ├── rls_security.sql    # RLS paso 1 (acceso total a autenticados)
 ├── rls_security_por_rol.sql # RLS paso 2 (políticas por rol)
+├── rls_recepcion_fix.sql # Corrige escrituras: 'personal' = cualquier staff; matches/tournaments = solo recepción
+├── rename_monitors_to_personal.sql # Renombra la tabla monitors -> personal + recrea funciones RLS
 ├── student_role.sql    # Rol alumno: auth_user_id, student_recoveries, RLS
+├── students_privacy.sql # Privacidad: alumno solo lee su fila de students + vista students_roster (nombre/nivel, sin email/phone)
 ├── class_requests.sql  # Solicitudes de inscripción + notifications + Realtime
 ├── stripe_payments.sql # Cobro al aceptar: classes.precio + estados de pago
 ├── matches.sql / tournaments.sql / seed_students.sql
@@ -86,14 +89,21 @@ App_Reservas_Padel/
 
 ## Modelos de datos
 
-### monitors
+### personal (antiguamente `monitors`)
+Contiene **todo el personal del club** (coordinador / monitor / recepción), no solo monitores;
+el nombre `monitors` era histórico y se renombró a `personal` (`rename_monitors_to_personal.sql`).
+Se conservan a propósito: la columna `classes.monitor_id`/`class_requests.monitor_id`, las funciones
+`current_monitor_id()`/`is_coordinator()`/`current_staff_role()` y el valor de rol `'monitor'`.
+
 | Campo | Tipo |
 |---|---|
-| id | uuid |
+| id | text (id generado en cliente, p. ej. `_tf5...`, o UUID en texto) |
 | name | text |
 | email | text |
 | phone | text |
-| role | text (`monitor` / `coordinador`) |
+| role | text (`coordinador` / `monitor` / `recepcion`) |
+| permissions | text[] (permisos que usa la UI; coherente con `role`) |
+| auth_user_id | uuid (enlace a `auth.users`) |
 | created_date | date |
 
 ### students
@@ -302,7 +312,7 @@ Claves del diseño:
 
 ## Roles de usuario
 
-Los permisos viven en el array `monitors.permissions` (`coordinador` / `monitor` / `recepcion`). El rol `usuario` (alumno) **no** está en `monitors`: se deduce en el login (`resolveUserFromAuth` en `app.js`) cuando el usuario autenticado no tiene fila en `monitors` pero sí en `students` (por `students.auth_user_id`).
+Los permisos viven en el array `personal.permissions` (`coordinador` / `monitor` / `recepcion`). El rol `usuario` (alumno) **no** está en `personal`: se deduce en el login (`resolveUserFromAuth` en `app.js`) cuando el usuario autenticado no tiene fila en `personal` pero sí en `students` (por `students.auth_user_id`).
 
 - **Coordinador**: ve todos los monitores y sus clases, puede exportar a Excel. Su panel tiene dos pestañas: "Monitores" y "Gestión de clase" (historial de pagos de alumnos y retrasos), ver `switchCoordTab`/`renderGestionClase`.
 - **Monitor**: gestiona únicamente sus propias clases y alumnos. Desde el detalle de una clase puede "marcar ausencia" de un alumno (`markAbsence`), que genera una clase por recuperar. En su vista de calendario tiene el botón **"📩 Solicitudes"** (con contador de pendientes) que abre el apartado de solicitudes de inscripción de sus clases: acepta (`acceptRequest`) o rechaza (`rejectRequest`). **Aceptar no inscribe al alumno: genera su link de pago** (Stripe Checkout) y retiene la plaza; el alumno aparece en el calendario cuando paga (aviso en vivo por Realtime). Bajo las solicitudes pendientes, el modal lista las que están "Esperando pago" con su cuenta atrás. El aforo que ve (`2+1/4`) ya incluye las plazas retenidas.
@@ -314,6 +324,9 @@ Los permisos viven en el array `monitors.permissions` (`coordinador` / `monitor`
   - Avisos de clases libres que "cuadran" con su nivel: clases no cerradas (`is_completed=false`), que empiecen **a más de 60 minutos vista** (`MIN_LEAD_MINUTES`, para que dé tiempo a cobrar), con 1–3 alumnos (aforo con holds, sin llegar a `max_capacity`) y con el nivel del alumno dentro de ±0,5 del nivel medio de los inscritos (`findFreeClassesForStudent`). El estado "visto" se guarda en `localStorage`. Cada aviso tiene un botón **"Solicitar plaza"** (`requestClassEnrollment`) que crea una solicitud pendiente (tabla `class_requests`) y notifica al monitor.
   - **Mis solicitudes**: estado de las inscripciones pedidas y **donde el alumno paga**. Si el monitor la aceptó, la fila muestra "Pendiente de pago" con el importe, la cuenta atrás del plazo y un botón **"Pagar ahora"** que abre Stripe Checkout. Al pagar pasa a "Confirmada"; si se le pasa el plazo, a "Sin pagar" (la plaza se liberó y puede volver a solicitar). Todos los cambios le llegan en vivo por Supabase Realtime (`pago_pendiente` / `pago_confirmado` / `pago_expirado`).
   - **Bloqueo por impago**: si hay una cuota mensual (`period`, sin `class_id`) sin pagar de un mes anterior, o del mes actual pasado el día 5, se muestra una pantalla de bloqueo en vez del panel (`findBlockingUnpaidQuota`).
+  - **Mis datos** (solo lectura): tarjeta con su nombre, email y teléfono. El alumno **ve** sus datos pero **no los edita** (de momento).
+
+  **Privacidad de `students` (RLS + vista):** por `students_privacy.sql`, un alumno **solo puede leer su propia fila** de `students` (con su email/teléfono); de los demás alumnos **no ve email ni teléfono**. Para los avisos (nivel medio de la clase) el panel usa la vista `students_roster` (solo `id, name, level, active`). En `loadData`, si el usuario es alumno, `appState.students` se llena del roster + su propia fila completa fusionada; el personal carga la tabla completa como siempre. El alumno no tiene política de UPDATE (no edita).
 
 ## Funcionalidades principales
 
@@ -344,6 +357,7 @@ No se usa ningún framework frontend (React, Vue, Angular, etc.) ni gestor de pa
 - **Secretos**: nada de claves secretas en el navegador. La clave secreta de Stripe y la `service_role` de Supabase solo existen como variables de entorno de las Functions. En el cliente, únicamente la `anonKey`.
 - **Estado global**: toda la aplicación comparte `window.appState`. No crear estados locales que dupliquen esta estructura.
 - **Conversión de nombres**: `db.js` es el único punto donde se hace la conversión `camelCase` (app) ↔ `snake_case` (Supabase). Respetar este patrón al añadir nuevas columnas o campos.
+- **Texto opcional vacío = `NULL`, nunca `''`**: al escribir en Supabase un campo de texto opcional (email, phone, notes, comments, reason…), usar `campo || null` para no guardar cadenas vacías. Mezclar `NULL` y `''` para "sin dato" obliga a comprobar las dos cosas en cada consulta (`IS NULL` no encuentra los `''` y viceversa). La mayoría de `create*` ya lo hace; se corrigió en `createPersonal`/`createStudent` (email/phone).
 - **Orden de carga de scripts**: respetar el orden en `index.html` o la app no arranca (dependencias globales síncronas).
 - **Capacidad máxima de clase**: 4 alumnos. Esta restricción se aplica tanto en UI como en `db.js`.
 - **Slots horarios**: el drag & drop opera en intervalos de 15 minutos entre 08:00 y 23:00.

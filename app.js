@@ -14,7 +14,7 @@ const appState = {
     viewingStudentId: null,
     studentPayments: [],
     addPaymentType: null,
-    monitors: [],
+    personal: [],
     currentUser: null,
     viewingMonitorId: null,
     matches: [],
@@ -90,7 +90,7 @@ window.addEventListener('DOMContentLoaded', () => {
 async function resolveUserFromAuth(authUserId) {
     try {
         const { data: monitorRow } = await supabase
-            .from('monitors')
+            .from('personal')
             .select('*')
             .eq('auth_user_id', authUserId)
             .maybeSingle();
@@ -411,9 +411,9 @@ async function addMonitor(name, email, phone) {
             createdDate: new Date().toISOString(),
         };
 
-        const result = await db.createMonitor(monitor);
-        const converted = db.convertMonitorFromDB(result);
-        appState.monitors.push(converted);
+        const result = await db.createPersonal(monitor);
+        const converted = db.convertPersonalFromDB(result);
+        appState.personal.push(converted);
 
         if (isCoordinator()) {
             renderMonitorsList();
@@ -430,10 +430,10 @@ async function addMonitor(name, email, phone) {
 
 async function updateMonitor(monitorId, updates) {
     try {
-        await db.updateMonitor(monitorId, updates);
-        const monitorIndex = appState.monitors.findIndex(m => m.id === monitorId);
+        await db.updatePersonal(monitorId, updates);
+        const monitorIndex = appState.personal.findIndex(m => m.id === monitorId);
         if (monitorIndex !== -1) {
-            appState.monitors[monitorIndex] = { ...appState.monitors[monitorIndex], ...updates };
+            appState.personal[monitorIndex] = { ...appState.personal[monitorIndex], ...updates };
         }
 
         if (isCoordinator()) {
@@ -449,9 +449,9 @@ async function updateMonitor(monitorId, updates) {
 
 async function deleteMonitor(monitorId) {
     try {
-        await db.deleteMonitor(monitorId);
+        await db.deletePersonal(monitorId);
 
-        appState.monitors = appState.monitors.filter(m => m.id !== monitorId);
+        appState.personal = appState.personal.filter(m => m.id !== monitorId);
         appState.classes = appState.classes.filter(c => c.monitorId !== monitorId);
 
         if (isCoordinator()) {
@@ -467,11 +467,11 @@ async function deleteMonitor(monitorId) {
 }
 
 function getAllMonitors() {
-    return appState.monitors;
+    return appState.personal;
 }
 
 function getMonitorById(monitorId) {
-    return appState.monitors.find(m => m.id === monitorId);
+    return appState.personal.find(m => m.id === monitorId);
 }
 
 function getClassDurationHours(cls) {
@@ -778,9 +778,26 @@ async function loadAllData() {
     try {
         showLoading('Cargando datos...');
 
-        const [monitorsData, studentsData, classesData, matchesData, holdsData] = await Promise.all([
-            db.getMonitors(),
-            db.getStudents(),
+        // El alumno no puede leer la tabla `students` de los demás (privacidad, students_privacy.sql):
+        // carga el roster (nombre/nivel de todos, sin email/teléfono) y fusiona su propia fila completa.
+        // El personal carga todos los alumnos como siempre.
+        const isStudent = isUsuario();
+        const studentsLoader = isStudent
+            ? Promise.all([db.getStudentsRoster(), db.getStudents()]).then(([roster, own]) => {
+                  const list = roster.map(s => db.convertStudentFromDB(s));
+                  const ownRow = (own || [])[0];
+                  if (ownRow) {
+                      const ownConv = db.convertStudentFromDB(ownRow);
+                      const idx = list.findIndex(s => s.id === ownConv.id);
+                      if (idx !== -1) list[idx] = ownConv; else list.push(ownConv);
+                  }
+                  return list;
+              })
+            : db.getStudents().then(rows => rows.map(s => db.convertStudentFromDB(s)));
+
+        const [monitorsData, studentsList, classesData, matchesData, holdsData] = await Promise.all([
+            db.getPersonal(),
+            studentsLoader,
             db.getClasses(),
             db.getMatches().catch(err => {
                 // La tabla matches puede no existir aún (ejecutar matches.sql).
@@ -794,8 +811,8 @@ async function loadAllData() {
             })
         ]);
 
-        appState.monitors = monitorsData.map(m => db.convertMonitorFromDB(m));
-        appState.students = studentsData.map(s => db.convertStudentFromDB(s));
+        appState.personal = monitorsData.map(m => db.convertPersonalFromDB(m));
+        appState.students = studentsList;
         appState.classes = classesData.map(c => db.convertClassFromDB(c));
         appState.matches = matchesData.map(m => db.convertMatchFromDB(m));
         appState.classHolds = holdsData.map(h => db.convertRequestFromDB(h));
@@ -804,7 +821,7 @@ async function loadAllData() {
         if (typeof loadTournaments === 'function') await loadTournaments();
 
         console.log('✅ Datos cargados:', {
-            monitors: appState.monitors.length,
+            monitors: appState.personal.length,
             students: appState.students.length,
             classes: appState.classes.length,
             matches: appState.matches.length
@@ -827,7 +844,7 @@ function saveToLocalStorage() {
     try {
         localStorage.setItem('padelApp_students', JSON.stringify(appState.students || []));
         localStorage.setItem('padelApp_classes', JSON.stringify(appState.classes || []));
-        localStorage.setItem('padelApp_monitors', JSON.stringify(appState.monitors || []));
+        localStorage.setItem('padelApp_monitors', JSON.stringify(appState.personal || []));
         localStorage.setItem('padelApp_currentUser', JSON.stringify(appState.currentUser || null));
     } catch (e) {
         console.warn('saveToLocalStorage failed:', e);
@@ -843,13 +860,13 @@ function loadFromLocalStorage() {
 
         appState.students = students ? JSON.parse(students) : [];
         appState.classes = classes ? JSON.parse(classes) : [];
-        appState.monitors = monitors ? JSON.parse(monitors) : [];
+        appState.personal = monitors ? JSON.parse(monitors) : [];
         appState.currentUser = savedUser ? JSON.parse(savedUser) : null;
     } catch (e) {
         console.warn('loadFromLocalStorage failed:', e);
         appState.students = appState.students || [];
         appState.classes = appState.classes || [];
-        appState.monitors = appState.monitors || [];
+        appState.personal = appState.personal || [];
     }
 }
 
@@ -3232,7 +3249,7 @@ function renderMonitorsList() {
 
     container.innerHTML = '';
 
-    const monitors = appState.monitors.filter(m => (m.permissions || []).includes('monitor'));
+    const monitors = appState.personal.filter(m => (m.permissions || []).includes('monitor'));
 
     // Subtítulo del panel con el número de monitores
     const countLabel = document.getElementById('monitorsCountLabel');
@@ -5133,6 +5150,18 @@ async function renderStudentDashboard() {
                 <span class="section-chevron" aria-hidden="true"></span>
             </div>
             <div class="student-section-body">${recoveriesHtml}</div>
+        </div>
+
+        <div class="student-section ${appState.misDatosCollapsed ? 'collapsed' : ''}" id="misDatosSection">
+            <div class="student-section-head student-section-toggle" onclick="toggleStudentSection('misDatosSection', 'misDatosCollapsed')">
+                <h3>👤 Mis datos</h3>
+                <span class="section-chevron" aria-hidden="true"></span>
+            </div>
+            <div class="student-section-body">
+                <div class="detail-row"><span class="detail-label">Nombre:</span><span class="detail-value">${escapeHtml(student?.name || '—')}</span></div>
+                <div class="detail-row"><span class="detail-label">Email:</span><span class="detail-value">${escapeHtml(student?.email || 'Sin email')}</span></div>
+                <div class="detail-row"><span class="detail-label">Teléfono:</span><span class="detail-value">${escapeHtml(student?.phone || 'Sin teléfono')}</span></div>
+            </div>
         </div>
     `;
 }
@@ -7346,7 +7375,7 @@ function ensureExcelJS() {
 }
 
 async function exportToExcel() {
-    const monitors = appState.monitors;
+    const monitors = appState.personal;
     if (monitors.length === 0) {
         showToast('No hay monitores para exportar', 'warning');
         return;

@@ -5,13 +5,13 @@
 
 const db = {
     // ==========================================
-    // MONITORS
+    // PERSONAL (tabla 'personal': coordinador / monitor / recepción)
     // ==========================================
 
-    async getMonitors() {
+    async getPersonal() {
         try {
             const { data, error } = await supabase
-                .from('monitors')
+                .from('personal')
                 .select('*')
                 .order('name', { ascending: true });
 
@@ -23,10 +23,10 @@ const db = {
         }
     },
 
-    async getMonitorById(id) {
+    async getPersonalById(id) {
         try {
             const { data, error } = await supabase
-                .from('monitors')
+                .from('personal')
                 .select('*')
                 .eq('id', id)
                 .single();
@@ -39,15 +39,15 @@ const db = {
         }
     },
 
-    async createMonitor(monitor) {
+    async createPersonal(monitor) {
         try {
             const { data, error } = await supabase
-                .from('monitors')
+                .from('personal')
                 .upsert([{
                     id: monitor.id,
                     name: monitor.name,
-                    email: monitor.email,
-                    phone: monitor.phone,
+                    email: monitor.email || null,
+                    phone: monitor.phone || null,
                     role: monitor.role || 'monitor',
                     created_date: monitor.createdDate || new Date().toISOString()
                 }], { onConflict: 'id' })
@@ -62,10 +62,10 @@ const db = {
         }
     },
 
-    async updateMonitor(id, updates) {
+    async updatePersonal(id, updates) {
         try {
             const { data, error } = await supabase
-                .from('monitors')
+                .from('personal')
                 .update(updates)
                 .eq('id', id)
                 .select()
@@ -79,10 +79,10 @@ const db = {
         }
     },
 
-    async deleteMonitor(id) {
+    async deletePersonal(id) {
         try {
             const { error } = await supabase
-                .from('monitors')
+                .from('personal')
                 .delete()
                 .eq('id', id);
 
@@ -109,6 +109,25 @@ const db = {
             return data || [];
         } catch (error) {
             console.error('Error getting students:', error);
+            throw error;
+        }
+    },
+
+    // Roster de alumnos con SOLO columnas no sensibles (id, name, level, active),
+    // vía la vista `students_roster`. Lo usa el panel del alumno: por RLS un alumno
+    // no puede leer la tabla `students` de los demás (email/teléfono), pero sí este
+    // roster, necesario para calcular el nivel medio de las clases en los avisos.
+    async getStudentsRoster() {
+        try {
+            const { data, error } = await supabase
+                .from('students_roster')
+                .select('*')
+                .order('name', { ascending: true });
+
+            if (error) throw error;
+            return data || [];
+        } catch (error) {
+            console.error('Error getting students roster:', error);
             throw error;
         }
     },
@@ -152,8 +171,8 @@ const db = {
             const row = {
                 id: student.id,
                 name: student.name,
-                email: student.email,
-                phone: student.phone,
+                email: student.email || null,
+                phone: student.phone || null,
                 level: student.level,
                 registered_date: student.registeredDate || new Date().toISOString()
             };
@@ -325,7 +344,7 @@ const db = {
             if (updates.isCompleted !== undefined) dbUpdates.is_completed = updates.isCompleted;
             if (updates.monitorId !== undefined) dbUpdates.monitor_id = updates.monitorId;
             if (updates.monitorName !== undefined) dbUpdates.monitor_name = updates.monitorName;
-            if (updates.comments !== undefined) dbUpdates.comments = updates.comments;
+            if (updates.comments !== undefined) dbUpdates.comments = updates.comments || null;
             if (updates.paid !== undefined) dbUpdates.paid = updates.paid;
             if (updates.precio !== undefined) dbUpdates.precio = updates.precio;
 
@@ -490,7 +509,7 @@ const db = {
         }
     },
 
-    convertMonitorFromDB(dbMonitor) {
+    convertPersonalFromDB(dbMonitor) {
         if (!dbMonitor) return null;
         return {
             id: dbMonitor.id,
@@ -597,8 +616,8 @@ const db = {
             const dbUpdates = {};
             if (updates.paidDate !== undefined) dbUpdates.paid_date = updates.paidDate;
             if (updates.amount !== undefined) dbUpdates.amount = updates.amount;
-            if (updates.method !== undefined) dbUpdates.method = updates.method;
-            if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
+            if (updates.method !== undefined) dbUpdates.method = updates.method || null;
+            if (updates.notes !== undefined) dbUpdates.notes = updates.notes || null;
             const { data, error } = await supabase
                 .from('student_payments')
                 .update(dbUpdates)
@@ -800,7 +819,7 @@ const db = {
             if (updates.court !== undefined) dbUpdates.court = updates.court;
             if (updates.winner !== undefined) dbUpdates.winner = updates.winner;
             if (updates.isCompleted !== undefined) dbUpdates.is_completed = updates.isCompleted;
-            if (updates.comments !== undefined) dbUpdates.comments = updates.comments;
+            if (updates.comments !== undefined) dbUpdates.comments = updates.comments || null;
 
             const { data, error } = await supabase
                 .from('matches')

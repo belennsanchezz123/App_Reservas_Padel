@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS class_requests (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   class_id    TEXT REFERENCES classes(id) ON DELETE CASCADE,
   student_id  TEXT REFERENCES students(id) ON DELETE CASCADE,
-  monitor_id  TEXT REFERENCES monitors(id) ON DELETE CASCADE, -- monitor responsable (denormalizado)
+  monitor_id  TEXT REFERENCES personal(id) ON DELETE CASCADE, -- monitor responsable (denormalizado)
   status      TEXT NOT NULL DEFAULT 'pendiente'
               CHECK (status IN ('pendiente', 'aceptada', 'rechazada')),
   reason      TEXT,                                            -- motivo del rechazo (ej. 'clase completa')
