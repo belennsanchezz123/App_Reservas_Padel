@@ -8,15 +8,27 @@ const db = {
     // PERSONAL (tabla 'personal': coordinador / monitor / recepción)
     // ==========================================
 
+    // Con RLS activa (rls_activacion_final.sql) la tabla `personal` solo devuelve:
+    // al coordinador todas las filas, y a monitor/recepción la suya. El resto de
+    // roles necesita igualmente los NOMBRES para pintar el calendario, así que se
+    // carga la vista `personal_roster` (id, name, role, permissions — sin email ni
+    // teléfono) y se fusionan encima las filas completas que RLS sí permita leer.
+    // Mismo patrón que students_roster + students en loadAllData (app.js).
     async getPersonal() {
         try {
-            const { data, error } = await supabase
-                .from('personal')
-                .select('*')
-                .order('name', { ascending: true });
+            const [rosterRes, fullRes] = await Promise.all([
+                supabase.from('personal_roster').select('*').order('name', { ascending: true }),
+                supabase.from('personal').select('*'),
+            ]);
+            if (rosterRes.error) throw rosterRes.error;
 
-            if (error) throw error;
-            return data || [];
+            const roster = rosterRes.data || [];
+            const fullRows = fullRes.error ? [] : (fullRes.data || []);
+            for (const row of fullRows) {
+                const idx = roster.findIndex(p => p.id === row.id);
+                if (idx !== -1) roster[idx] = row; else roster.push(row);
+            }
+            return roster;
         } catch (error) {
             console.error('Error getting monitors:', error);
             throw error;
@@ -1209,12 +1221,15 @@ const db = {
     // Solicitudes con un pago en curso que todavía retienen plaza ("holds").
     // Una solicitud cuyo plazo ya venció no retiene nada: la plaza vuelve a estar
     // libre aunque el webhook de expiración de Stripe aún no haya llegado.
+    // Se lee la vista `class_holds` (id, class_id, status, payment_expires_at):
+    // con RLS activa un alumno solo puede leer SUS filas de class_requests, pero
+    // el aforo (occupancyOf) necesita contar los holds de todo el mundo — la vista
+    // expone solo lo mínimo, sin alumno, precio ni checkout_url.
     async getActiveHolds() {
         try {
             const { data, error } = await supabase
-                .from('class_requests')
+                .from('class_holds')
                 .select('*')
-                .eq('status', 'aceptada_pendiente_pago')
                 .gt('payment_expires_at', new Date().toISOString());
             if (error) throw error;
             return data || [];

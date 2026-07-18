@@ -76,6 +76,7 @@ App_Reservas_Padel/
 ├── rename_monitors_to_personal.sql # Renombra la tabla monitors -> personal + recrea funciones RLS
 ├── student_role.sql    # Rol alumno: auth_user_id, student_recoveries, RLS
 ├── students_privacy.sql # Privacidad: alumno solo lee su fila de students + vista students_roster (nombre/nivel, sin email/phone)
+├── rls_activacion_final.sql # ACTIVACIÓN DEFINITIVA de RLS en TODAS las tablas + políticas finales + vistas personal_roster y class_holds (ejecutar el ÚLTIMO; aborta si hay personal sin auth_user_id)
 ├── class_requests.sql  # Solicitudes de inscripción + notifications + Realtime
 ├── stripe_payments.sql # Cobro al aceptar: classes.precio + estados de pago
 ├── matches.sql / tournaments.sql / seed_students.sql
@@ -327,6 +328,8 @@ Los permisos viven en el array `personal.permissions` (`coordinador` / `monitor`
   - **Mis datos** (solo lectura): tarjeta con su nombre, email y teléfono. El alumno **ve** sus datos pero **no los edita** (de momento).
 
   **Privacidad de `students` (RLS + vista):** por `students_privacy.sql`, un alumno **solo puede leer su propia fila** de `students` (con su email/teléfono); de los demás alumnos **no ve email ni teléfono**. Para los avisos (nivel medio de la clase) el panel usa la vista `students_roster` (solo `id, name, level, active`). En `loadData`, si el usuario es alumno, `appState.students` se llena del roster + su propia fila completa fusionada; el personal carga la tabla completa como siempre. El alumno no tiene política de UPDATE (no edita).
+
+  **RLS activa en todas las tablas (`rls_activacion_final.sql`):** el modelo definitivo de acceso está activado. Dos vistas más siguen el mismo patrón roster (sin `security_invoker`, solo columnas no sensibles, `GRANT` solo a `authenticated`): `personal_roster` (`id, name, role, permissions` — para que cualquier rol pinte los nombres de monitor en el calendario; `db.getPersonal()` fusiona roster + filas completas que RLS permita) y `class_holds` (`id, class_id, status, payment_expires_at` — para que `occupancyOf` cuente las plazas retenidas de todos sin exponer alumno/precio/checkout_url; la usa `db.getActiveHolds()`). En `class_requests` el cliente solo puede: alumno INSERT de su solicitud en `'pendiente'` y SELECT de las suyas; monitor SELECT de las suyas y UPDATE únicamente `'pendiente' → 'rechazada'`. **Todas las transiciones de pago las hace el servidor con `service_role`** (salta RLS). En `notifications`, cada uno lee/marca leídas solo las suyas (Realtime también lo respeta).
 
 ## Funcionalidades principales
 

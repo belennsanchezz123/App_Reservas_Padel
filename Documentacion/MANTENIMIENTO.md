@@ -267,3 +267,24 @@ TO personal_id` en `classes` y `class_requests`, renombrar `current_monitor_id()
 Alto churn y coordinación `ALTER` + despliegue. Mantener el rol `'monitor'` intacto en cualquier caso.
 
 **Esfuerzo estimado:** alto (renombrar columna en producción coordinado con el código + reescribir políticas).
+
+---
+
+## 12. RLS de `classes`: todo el personal lee todas las clases (afinado por monitor aplazado)
+
+**Estado actual:** con `rls_activacion_final.sql`, la política `classes_select` deja **leer
+todas las clases a cualquier personal** (coordinador/monitor/recepción); el calendario del
+monitor se filtra en cliente (`getClassesForDate` en `app.js`), como siempre. La **escritura**
+sí es estricta: solo el coordinador o el monitor dueño (`monitor_id`).
+
+**Por qué se decidió así:** el diseño original "el monitor solo VE las suyas"
+(`rls_security_por_rol.sql`) fue parte de lo que rompió el primer intento de RLS, y la app
+entera asume todas las clases en memoria (avisos de alumnos, estadísticas, exportación).
+Recepción además podría necesitar consultar clases. Es una relajación **solo de lectura**
+entre personal del club; los alumnos siguen limitados (futuras no cerradas).
+
+**Cuándo abordarlo:** si algún día se quiere que un monitor no pueda ni ver la agenda de
+otros. Implica volver a `monitor_id = current_monitor_id()` en el SELECT y revisar todo lo
+que asume la lista completa (mismo inventario que la entrada 1).
+
+**Esfuerzo estimado:** bajo en SQL, medio en revisar la app (solapa con la entrada 1).

@@ -1,12 +1,18 @@
 # Seguridad y roles — Cambios pendientes
 
-> **Estado actual (julio 2026):** el proyecto está en fase de pruebas. En algún momento se
-> aplicaron las políticas RLS **por rol** (paso 2), pero eso rompía el uso normal: los alumnos
-> no veían clases de otros monitores y los monitores **no enlazados a Auth** no podían escribir
-> (ver "⚠️ Síntoma" abajo). Por eso, para seguir probando, **se ha vuelto a desactivar RLS**
-> en las tablas implicadas: `classes`, `students`, `class_requests`, `notifications` (y, según
-> se necesite, el resto). Este documento recoge **todo lo que hay que hacer** para activar la
-> seguridad real más adelante.
+> **Estado actual (18-jul-2026): RLS ACTIVADA en todas las tablas** con
+> `rls_activacion_final.sql` (un único script idempotente que reemplaza a los pasos sueltos).
+> Cubre también `class_requests` y `notifications` (que nunca habían tenido políticas): el
+> alumno ya **no** puede marcarse `confirmada_pagada` desde la consola (§7 resuelto) — las
+> transiciones de pago son solo del servidor (`service_role`). Lo que rompió el intento
+> anterior está mitigado: el script **aborta** si algún `personal` no tiene `auth_user_id`
+> enlazado, y los datos que cada rol necesita ver de otros salen de vistas roster no sensibles
+> (`students_roster`, `personal_roster`, `class_holds`), fusionadas en `db.js`
+> (`getPersonal`, `getActiveHolds`, `db.js?v=37`).
+>
+> **Sigue pendiente de este documento:** autenticar los endpoints de `functions/api`
+> (hoy no verifican el JWT: aceptan `studentId`/`monitorId` del body), el XSS de §9,
+> y la limpieza de login duplicado (§ problemas 5-6).
 >
 > **⚠️ Síntoma clave detectado:** si una cuenta actúa como un monitor cuya fila en `personal`
 > **no tiene `auth_user_id`** enlazado al usuario de Auth con el que se ha hecho login, entonces
