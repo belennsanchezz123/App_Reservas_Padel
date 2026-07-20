@@ -69,17 +69,20 @@ App_Reservas_Padel/
 │   ├── _shared/        # stripe.js, supabase.js, time.js, fulfillment.js
 │   └── api/            # checkout/create.js, checkout/status.js, stripe/webhook.js
 ├── .dev.vars.example   # Plantilla de secretos (copiar a .dev.vars, que está en .gitignore)
-├── schema.sql          # Esquema base de las tablas
-├── rls_security.sql    # RLS paso 1 (acceso total a autenticados)
-├── rls_security_por_rol.sql # RLS paso 2 (políticas por rol)
-├── rls_recepcion_fix.sql # Corrige escrituras: 'personal' = cualquier staff; matches/tournaments = solo recepción
-├── rename_monitors_to_personal.sql # Renombra la tabla monitors -> personal + recrea funciones RLS
-├── student_role.sql    # Rol alumno: auth_user_id, student_recoveries, RLS
-├── students_privacy.sql # Privacidad: alumno solo lee su fila de students + vista students_roster (nombre/nivel, sin email/phone)
-├── rls_activacion_final.sql # ACTIVACIÓN DEFINITIVA de RLS en TODAS las tablas + políticas finales + vistas personal_roster y class_holds (ejecutar el ÚLTIMO; aborta si hay personal sin auth_user_id)
-├── class_requests.sql  # Solicitudes de inscripción + notifications + Realtime
-├── stripe_payments.sql # Cobro al aceptar: classes.precio + estados de pago
-├── matches.sql / tournaments.sql / seed_students.sql
+├── base de datos/      # TODAS las migraciones SQL de Supabase (ejecutar en el SQL Editor)
+│   ├── schema.sql          # Esquema base de las tablas
+│   ├── rls_security.sql    # RLS paso 1 (acceso total a autenticados)
+│   ├── rls_security_por_rol.sql # RLS paso 2 (políticas por rol)
+│   ├── rls_recepcion_fix.sql # Corrige escrituras: 'personal' = cualquier staff; matches/tournaments = solo recepción
+│   ├── rls_cleanup_old_policies.sql # Borra políticas antiguas/permisivas
+│   ├── rename_monitors_to_personal.sql # Renombra la tabla monitors -> personal + recrea funciones RLS
+│   ├── student_role.sql    # Rol alumno: auth_user_id, student_recoveries, RLS
+│   ├── students_privacy.sql # Privacidad: alumno solo lee su fila de students + vista students_roster (nombre/nivel, sin email/phone)
+│   ├── rls_activacion_final.sql # ACTIVACIÓN DEFINITIVA de RLS en TODAS las tablas + políticas finales + vistas personal_roster y class_holds (ejecutar el ÚLTIMO; aborta si hay personal sin auth_user_id)
+│   ├── class_requests.sql  # Solicitudes de inscripción + notifications + Realtime
+│   ├── stripe_payments.sql # Cobro al aceptar: classes.precio + estados de pago
+│   ├── race_and_cancellation.sql # Reserva atómica de plaza + baja del alumno
+│   └── matches.sql / tournaments.sql / seed_students.sql / fix_class_dates.sql
 └── Documentacion/      # Toda la documentación .md
     ├── CLAUDE.md               # Este archivo
     ├── MANTENIMIENTO.md        # Deuda técnica y mejoras aplazadas
@@ -289,6 +292,16 @@ Motor (`tournaments.js`): `computeGroupPlan(n, format)` calcula grupos/clasifica
 Único código de servidor del proyecto: `functions/` (Cloudflare Pages Functions). Está en
 **modo test** (`sk_test_…`). Migraciones: `stripe_payments.sql` + `race_and_cancellation.sql`.
 
+**Autenticación de los endpoints (jul 2026):** `checkout/create`, `checkout/status` y
+`enrollment/leave` exigen el **JWT de Supabase** en `Authorization: Bearer <token>`
+(`db.js` lo adjunta con `authHeaders()`). El servidor valida el token contra
+`auth/v1/user` y deriva la identidad de `_shared/auth.js` (`getStudentFromAuth`/
+`getStaffFromAuth`): **nunca se fía de ids del body**. Reglas: `create` → solo personal,
+y si la solicitud tiene monitor responsable, solo ese monitor o el coordinador;
+`status` → solo el alumno dueño de la solicitud o personal; `leave` → el alumno se
+deduce del token (el body solo lleva `classId`). Sin token o con token inválido → 401.
+El webhook de Stripe NO lleva JWT: su autenticación es la firma HMAC (`constructEvent`).
+
 | Endpoint | Cuándo | Qué hace |
 |---|---|---|
 | `POST /api/checkout/create` | El monitor pulsa "Aceptar" | Corte de 60 min + precio, **reserva atómica** de la plaza (RPC `reserve_class_spot`, sin sobrecupo), crea la sesión de Stripe con el `expires_at` dinámico y notifica al alumno. Si la plaza ya no está → `plaza ya cubierta` |
@@ -316,7 +329,7 @@ Claves del diseño:
 Los permisos viven en el array `personal.permissions` (`coordinador` / `monitor` / `recepcion`). El rol `usuario` (alumno) **no** está en `personal`: se deduce en el login (`resolveUserFromAuth` en `app.js`) cuando el usuario autenticado no tiene fila en `personal` pero sí en `students` (por `students.auth_user_id`).
 
 - **Coordinador**: ve todos los monitores y sus clases, puede exportar a Excel. Su panel tiene dos pestañas: "Monitores" y "Gestión de clase" (historial de pagos de alumnos y retrasos), ver `switchCoordTab`/`renderGestionClase`.
-- **Monitor**: gestiona únicamente sus propias clases y alumnos. Desde el detalle de una clase puede "marcar ausencia" de un alumno (`markAbsence`), que genera una clase por recuperar. En su vista de calendario tiene el botón **"📩 Solicitudes"** (con contador de pendientes) que abre el apartado de solicitudes de inscripción de sus clases: acepta (`acceptRequest`) o rechaza (`rejectRequest`). **Aceptar no inscribe al alumno: genera su link de pago** (Stripe Checkout) y retiene la plaza; el alumno aparece en el calendario cuando paga (aviso en vivo por Realtime). Bajo las solicitudes pendientes, el modal lista las que están "Esperando pago" con su cuenta atrás. El aforo que ve (`2+1/4`) ya incluye las plazas retenidas.
+- **Monitor**: gestiona únicamente sus propias clases y alumnos. Desde el detalle de una clase puede "marcar ausencia" de un alumno (`markAbsence`), que genera una clase por recuperar. En su vista de calendario tiene el botón **"📩 Solicitudes"** (con contador de pendientes) que abre el apartado de solicitudes de inscripción de sus clases: acepta (`acceptRequest`) o rechaza (`rejectRequest`). **Aceptar no inscribe al alumno: genera su link de pago** (Stripe Checkout) y retiene la plaza; el alumno aparece en el calendario cuando paga (aviso en vivo por Realtime). Bajo las solicitudes pendientes, el modal lista las que están "Esperando pago" con su cuenta atrás. El aforo que ve (`2+1/4`) ya incluye las plazas retenidas. Junto a Solicitudes tiene la **"🔔 Avisos"** (bandeja de notificaciones, `openNotifModal`/`renderNotifBadge`): los toasts en vivo son efímeros, así que la bandeja lista los avisos de la tabla `notifications` (pagos recibidos, bajas de alumnos, nuevas solicitudes) con contador de no leídos; al abrirla se marcan todos como leídos (`markAllNotificationsRead`), cada aviso tiene un ✕ para borrarlo (`deleteNotif`) y hay un "Borrar todos" con confirmación (`clearAllNotifs`). El borrado necesita la política RLS `notifications_delete` (el destinatario borra solo los suyos, `rls_activacion_final.sql`). Así una baja ocurrida con la app cerrada no se pierde.
 - **Recepción**: gestión de pagos, caja, partidos, categorías y torneos.
 - **Usuario (alumno)**: `permissions: ['usuario']`, `currentUser.studentId` = `students.id`. Panel propio (`showStudentView`/`renderStudentDashboard`) con:
   - **Mis clases** (próximas): clases futuras donde el alumno está inscrito. Cada una, si faltan **≥24h**, tiene un botón **"Darme de baja"** (`leaveClass` → `POST /api/enrollment/leave`); con menos de 24h no se puede cancelar. Si la clase estaba pagada, la baja genera una clase por recuperar.
@@ -329,7 +342,7 @@ Los permisos viven en el array `personal.permissions` (`coordinador` / `monitor`
 
   **Privacidad de `students` (RLS + vista):** por `students_privacy.sql`, un alumno **solo puede leer su propia fila** de `students` (con su email/teléfono); de los demás alumnos **no ve email ni teléfono**. Para los avisos (nivel medio de la clase) el panel usa la vista `students_roster` (solo `id, name, level, active`). En `loadData`, si el usuario es alumno, `appState.students` se llena del roster + su propia fila completa fusionada; el personal carga la tabla completa como siempre. El alumno no tiene política de UPDATE (no edita).
 
-  **RLS activa en todas las tablas (`rls_activacion_final.sql`):** el modelo definitivo de acceso está activado. Dos vistas más siguen el mismo patrón roster (sin `security_invoker`, solo columnas no sensibles, `GRANT` solo a `authenticated`): `personal_roster` (`id, name, role, permissions` — para que cualquier rol pinte los nombres de monitor en el calendario; `db.getPersonal()` fusiona roster + filas completas que RLS permita) y `class_holds` (`id, class_id, status, payment_expires_at` — para que `occupancyOf` cuente las plazas retenidas de todos sin exponer alumno/precio/checkout_url; la usa `db.getActiveHolds()`). En `class_requests` el cliente solo puede: alumno INSERT de su solicitud en `'pendiente'` y SELECT de las suyas; monitor SELECT de las suyas y UPDATE únicamente `'pendiente' → 'rechazada'`. **Todas las transiciones de pago las hace el servidor con `service_role`** (salta RLS). En `notifications`, cada uno lee/marca leídas solo las suyas (Realtime también lo respeta).
+  **RLS activa en todas las tablas (`rls_activacion_final.sql`):** el modelo definitivo de acceso está activado. Dos vistas más siguen el mismo patrón roster (sin `security_invoker`, solo columnas no sensibles, `GRANT` solo a `authenticated`): `personal_roster` (`id, name, role, permissions` — para que cualquier rol pinte los nombres de monitor en el calendario; `db.getPersonal()` fusiona roster + filas completas que RLS permita) y `class_holds` (`id, class_id, status, payment_expires_at` — para que `occupancyOf` cuente las plazas retenidas de todos sin exponer alumno/precio/checkout_url; la usa `db.getActiveHolds()`). En `class_requests` el cliente solo puede: alumno INSERT de su solicitud en `'pendiente'` y SELECT de las suyas; monitor SELECT de las suyas y UPDATE únicamente `'pendiente' → 'rechazada'`. **Todas las transiciones de pago las hace el servidor con `service_role`** (salta RLS). En `notifications`, cada uno lee/marca leídas solo las suyas (Realtime también lo respeta); por eso `db.createNotification` inserta **sin** `.select()`: el remitente no puede leer la notificación que envía, y pedir la fila de vuelta abortaría el insert (42501).
 
 ## Funcionalidades principales
 

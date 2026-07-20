@@ -337,6 +337,15 @@ CREATE POLICY "notifications_update" ON public.notifications
     OR recipient_id = public.current_monitor_id()
   );
 
+-- Borrar: el destinatario puede eliminar SUS avisos (botón ✕ de la bandeja 🔔).
+DROP POLICY IF EXISTS "notifications_delete" ON public.notifications;
+CREATE POLICY "notifications_delete" ON public.notifications
+  FOR DELETE TO authenticated
+  USING (
+    recipient_id = public.current_student_id()
+    OR recipient_id = public.current_monitor_id()
+  );
+
 
 -- ----------------------------------------------------------------------------
 -- 10) STUDENT_RECOVERIES y STUDENT_PAYMENTS: personal escribe; alumno lee las suyas.

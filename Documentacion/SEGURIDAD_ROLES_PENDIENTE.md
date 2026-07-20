@@ -10,9 +10,16 @@
 > (`students_roster`, `personal_roster`, `class_holds`), fusionadas en `db.js`
 > (`getPersonal`, `getActiveHolds`, `db.js?v=37`).
 >
-> **Sigue pendiente de este documento:** autenticar los endpoints de `functions/api`
-> (hoy no verifican el JWT: aceptan `studentId`/`monitorId` del body), el XSS de §9,
-> y la limpieza de login duplicado (§ problemas 5-6).
+> **✅ Endpoints de `functions/api` AUTENTICADOS (19-jul-2026):** `checkout/create`,
+> `checkout/status` y `enrollment/leave` exigen el JWT de Supabase (`Authorization`)
+> y derivan la identidad del token vía `functions/_shared/auth.js` — ya no se fían
+> del `studentId`/`monitorId` del body (sin token → 401). Ver CLAUDE.md "Pagos con Stripe".
+> También cerrado el **XSS almacenado de `showToast`** (§9: ahora escapa el mensaje).
+>
+> **Sigue pendiente de este documento:** el resto de la tabla de XSS de §9 (funciones
+> de render antiguas), el trigger de `classes.paid` (§2.4), quitar el fallback de rol
+> desde `localStorage` (`loadFromLocalStorage`), y la limpieza de código muerto (§3.4:
+> `borrador/`, `app_supabase.js`).
 >
 > **⚠️ Síntoma clave detectado:** si una cuenta actúa como un monitor cuya fila en `personal`
 > **no tiene `auth_user_id`** enlazado al usuario de Auth con el que se ha hecho login, entonces
@@ -283,7 +290,7 @@ cuando el usuario autenticado **no** tiene fila en `personal` pero **sí** en
 `currentUser.permissions = ['usuario']` y se muestra el panel del alumno
 (`showStudentView` / `renderStudentDashboard`).
 
-**Migración:** `student_role.sql` (en la raíz del proyecto) añade
+**Migración:** `student_role.sql` (en `base de datos/`) añade
 `students.auth_user_id`, crea la tabla `student_recoveries` (clases por recuperar,
 que genera el monitor con `markAbsence`) y define funciones y políticas RLS para
 que el alumno solo lea SUS pagos/recuperaciones y las clases futuras no cerradas
@@ -313,7 +320,7 @@ vez del panel (`findBlockingUnpaidQuota` en `app.js`).
 
 ---
 
-## 7. Solicitudes de inscripción + notificaciones — RLS PENDIENTE
+## 7. Solicitudes de inscripción + notificaciones — ✅ RLS ACTIVADA (jul 2026, `rls_activacion_final.sql`; políticas definitivas, ver cabecera)
 
 `class_requests.sql` crea `class_requests` y `notifications` con **RLS deshabilitado**
 ("modo simple", igual que el resto). **Son las dos únicas tablas del proyecto que siguen
@@ -430,7 +437,7 @@ Código de servidor en `functions/` (Cloudflare Pages Functions), migración en
 - **La confirmación del pago no depende del navegador**: la hace el webhook. Cerrar la pestaña
   tras pagar no deja la plaza sin confirmar.
 
-### ⚠️ Lo que queda pendiente (consecuencia de tener RLS desactivada)
+### ⚠️ Lo que quedaba pendiente — ✅ RESUELTO (jul 2026) al activar RLS con `rls_activacion_final.sql` (se conserva como referencia)
 
 1. **`class_requests` sigue sin RLS, y ahora contiene el estado del pago.** Con la `anonKey`,
    cualquiera puede hacer desde la consola del navegador:
@@ -547,7 +554,7 @@ no interpreta HTML. El `borrador/` (`app_backup.js`, `migrate.html`) es código 
 
 ### Checklist
 
-- [ ] `showToast` escapa el mensaje (cierra el XSS almacenado vía notificaciones).
+- [x] `showToast` escapa el mensaje (cierra el XSS almacenado vía notificaciones). ✅ Hecho (jul 2026, `app.js?v=92`).
 - [ ] Todas las filas de la tabla anterior usan `escapeHtml(...)` o `textContent`.
 - [ ] Prueba: crear un alumno llamado `<img src=x onerror=alert(1)>`; ni su tarjeta, ni el toast
       de solicitud, ni el detalle de clase deben ejecutar el `alert`.

@@ -6,8 +6,10 @@
 //
 // Pregunta a Stripe el estado real de la sesión y aplica la MISMA lógica que el
 // webhook. Al ser idempotente, da igual cuál de los dos llegue primero.
+// AUTENTICACIÓN: solo el alumno dueño de la solicitud o el personal.
 
 import { selectOne } from '../../_shared/supabase.js';
+import { getAuthUser, getStudentFromAuth, getStaffFromAuth } from '../../_shared/auth.js';
 import { retrieveCheckoutSession } from '../../_shared/stripe.js';
 import { confirmPayment, cancelForNonPayment } from '../../_shared/fulfillment.js';
 
@@ -22,10 +24,20 @@ export async function onRequestGet({ request, env }) {
     if (!requestId) return json({ error: 'Falta requestId' }, 400);
 
     try {
+        const authUser = await getAuthUser(env, request);
+        if (!authUser) return json({ error: 'No autenticado' }, 401);
+
         const solicitud = await selectOne(env, 'class_requests',
-            `id=eq.${encodeURIComponent(requestId)}&select=id,status,stripe_session_id`);
+            `id=eq.${encodeURIComponent(requestId)}&select=id,status,stripe_session_id,student_id`);
 
         if (!solicitud) return json({ error: 'La solicitud no existe' }, 404);
+
+        // Solo el alumno dueño de la solicitud o el personal pueden consultarla.
+        const student = await getStudentFromAuth(env, authUser.id);
+        if (!student || student.id !== solicitud.student_id) {
+            const staff = await getStaffFromAuth(env, authUser.id);
+            if (!staff) return json({ error: 'No autorizado' }, 403);
+        }
         // Ya resuelta (el webhook llegó antes): nada que hacer.
         if (solicitud.status !== 'aceptada_pendiente_pago') {
             return json({ status: solicitud.status });

@@ -1,6 +1,8 @@
-// POST /api/enrollment/leave  { classId, studentId }
+// POST /api/enrollment/leave  { classId }
 //
-// El alumno se da de baja de una clase en la que está inscrito.
+// El alumno AUTENTICADO se da de baja de una clase en la que está inscrito.
+// Su identidad sale del JWT (cabecera Authorization), NUNCA del body: antes se
+// aceptaba un studentId del cliente y cualquiera podía dar de baja a cualquiera.
 // Reglas (decididas con la usuaria):
 //  - Solo con >= 24h de antelación. Con menos margen, no se permite.
 //  - Si la clase estaba PAGADA, en vez de perder el dinero se le genera una
@@ -12,6 +14,7 @@
 // sobre classes / student_recoveries (RLS), y para hacerlo de forma consistente.
 
 import { selectOne, select, patch, insert, notify } from '../../_shared/supabase.js';
+import { getAuthUser, getStudentFromAuth } from '../../_shared/auth.js';
 import { getOccupancy, notifyFreeSpot } from '../../_shared/fulfillment.js';
 import { classStartMs } from '../../_shared/time.js';
 
@@ -31,10 +34,17 @@ export async function onRequestPost({ request, env }) {
         return json({ error: 'Cuerpo de la petición no válido' }, 400);
     }
 
-    const { classId, studentId } = body || {};
-    if (!classId || !studentId) return json({ error: 'Faltan datos' }, 400);
+    const { classId } = body || {};
+    if (!classId) return json({ error: 'Faltan datos' }, 400);
 
     try {
+        // Identidad real del que llama: del token, no del body.
+        const authUser = await getAuthUser(env, request);
+        if (!authUser) return json({ error: 'No autenticado' }, 401);
+        const student = await getStudentFromAuth(env, authUser.id);
+        if (!student) return json({ error: 'Solo un alumno puede darse de baja' }, 403);
+        const studentId = student.id;
+
         const cls = await selectOne(env, 'classes',
             `id=eq.${encodeURIComponent(classId)}&select=*`);
         if (!cls) return json({ error: 'La clase no existe' }, 404);

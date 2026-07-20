@@ -4226,9 +4226,11 @@ function showToast(message, type = 'success') {
 
     const icon = type === 'success' ? '✓' : '✕';
 
+    // escapeHtml: el mensaje puede venir de la BD (p. ej. notifications.message,
+    // que incluye nombres de alumnos) — sin escapar sería un XSS almacenado.
     toast.innerHTML = `
         <div class="toast-icon">${icon}</div>
-        <div class="toast-message">${message}</div>
+        <div class="toast-message">${escapeHtml(message)}</div>
     `;
 
     container.appendChild(toast);
@@ -4683,6 +4685,8 @@ function showMonitorView() {
 
     // Solicitudes de inscripción: solo el monitor las gestiona.
     renderSolicitudesBadge();
+    // Bandeja de avisos 🔔: lo que los toasts pierden si la app estaba cerrada.
+    renderNotifBadge();
     const monitorId = getCurrentUser()?.id;
     if (isMonitor() && monitorId) subscribeToNotifications(monitorId);
 }
@@ -5288,7 +5292,8 @@ async function leaveClass(classId) {
     if (!ok) return;
 
     try {
-        const res = await db.leaveClass(classId, studentId);
+        // El servidor identifica al alumno por su JWT (no se envía studentId).
+        const res = await db.leaveClass(classId);
         showToast(res.recovery
             ? 'Te has dado de baja. La clase se ha añadido a tus clases por recuperar.'
             : 'Te has dado de baja de la clase.', 'success');
@@ -5340,6 +5345,140 @@ async function openSolicitudesModal() {
 
 function closeSolicitudesModal() {
     closeModal('solicitudesModal');
+}
+
+// ---- Bandeja de avisos del monitor (🔔) ----
+// Los toasts en vivo son efímeros: si el monitor no tenía la app abierta (p. ej.
+// un alumno se dio de baja por la noche), el aviso se perdía. La tabla
+// notifications ya guarda todo con is_read; esta bandeja lo hace visible.
+
+const NOTIF_ICONS = {
+    nueva_solicitud: '📩',
+    solicitud_aceptada: '💶',   // un alumno ha pagado su plaza
+    solicitud_rechazada: '👋',  // baja de un alumno (el servidor reutiliza este tipo)
+    pago_pendiente: '⏳',
+    pago_confirmado: '💶',
+    pago_expirado: '⌛',
+    plaza_libre: '🎾',
+};
+
+// Pinta la campana con el nº de avisos no leídos del monitor logueado.
+async function renderNotifBadge() {
+    const btn = document.getElementById('notifBellBtn');
+    const badge = document.getElementById('notifBellBadge');
+    if (!btn || !badge) return;
+    if (!isMonitor()) {
+        btn.style.display = 'none';
+        return;
+    }
+    btn.style.display = '';
+
+    const monitorId = getCurrentUser()?.id;
+    if (!monitorId) return;
+    try {
+        const rows = await db.getUnreadNotifications(monitorId);
+        const count = (rows || []).length;
+        badge.textContent = count > 9 ? '9+' : String(count);
+        badge.style.display = count > 0 ? '' : 'none';
+    } catch (error) {
+        console.warn('No se pudo cargar el contador de avisos:', error);
+    }
+}
+
+// Abre la bandeja: lista los últimos avisos (no leídos resaltados) y, una vez
+// mostrados, los marca todos como leídos (el resaltado de esta vista se conserva).
+async function openNotifModal() {
+    const container = document.getElementById('notifList');
+    if (!container) return;
+    openModal('notifModal');
+    container.innerHTML = '<p class="profile-loading">Cargando avisos...</p>';
+
+    const monitorId = getCurrentUser()?.id;
+    let notifs = [];
+    try {
+        const rows = await db.getNotifications(monitorId);
+        notifs = (rows || []).map(n => db.convertNotificationFromDB(n)).slice(0, 50);
+    } catch (error) {
+        console.error('Error cargando los avisos:', error);
+        container.innerHTML = '<p class="student-empty">No se pudieron cargar los avisos.</p>';
+        return;
+    }
+
+    if (notifs.length === 0) {
+        container.innerHTML = '<p class="student-empty">No tienes avisos.</p>';
+        return;
+    }
+
+    const toolbar = `
+        <div class="notif-toolbar">
+            <button class="btn btn-sm btn-baja" onclick="clearAllNotifs()">Borrar todos</button>
+        </div>`;
+
+    container.innerHTML = toolbar + notifs.map(n => {
+        const icon = NOTIF_ICONS[n.type] || '🔔';
+        return `
+            <div class="solicitud-row${n.isRead ? '' : ' notif-unread'}">
+                <div class="solicitud-info">
+                    <div class="solicitud-name">${icon} ${escapeHtml(n.message || n.type)}</div>
+                    <div class="solicitud-class">${escapeHtml(formatNotifDate(n.createdAt))}</div>
+                </div>
+                <button class="notif-delete" title="Borrar aviso" onclick="deleteNotif('${escapeHtml(n.id)}', this)">✕</button>
+            </div>`;
+    }).join('');
+
+    try {
+        await db.markAllNotificationsRead(monitorId);
+    } catch (error) {
+        console.warn('No se pudieron marcar los avisos como leídos:', error);
+    }
+    renderNotifBadge();
+}
+
+// Borra un aviso concreto (✕ de su fila) y actualiza la lista sin recargarla.
+async function deleteNotif(id, btn) {
+    try {
+        await db.deleteNotification(id);
+        const row = btn ? btn.closest('.solicitud-row') : null;
+        if (row) row.remove();
+        const list = document.getElementById('notifList');
+        if (list && !list.querySelector('.solicitud-row')) {
+            list.innerHTML = '<p class="student-empty">No tienes avisos.</p>';
+        }
+        renderNotifBadge();
+    } catch (error) {
+        console.error('Error borrando el aviso:', error);
+        showToast('No se pudo borrar el aviso', 'error');
+    }
+}
+
+// Vacía la bandeja entera (con confirmación).
+async function clearAllNotifs() {
+    const ok = await showConfirm('¿Borrar todos los avisos?', {
+        title: 'Borrar avisos', confirmText: 'Sí, borrar', cancelText: 'No', danger: true,
+    });
+    if (!ok) return;
+    try {
+        await db.deleteAllNotifications(getCurrentUser()?.id);
+        const list = document.getElementById('notifList');
+        if (list) list.innerHTML = '<p class="student-empty">No tienes avisos.</p>';
+        renderNotifBadge();
+    } catch (error) {
+        console.error('Error vaciando los avisos:', error);
+        showToast('No se pudieron borrar los avisos', 'error');
+    }
+}
+
+function closeNotifModal() {
+    closeModal('notifModal');
+}
+
+function formatNotifDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${formatDate(d)} · ${hh}:${mm}`;
 }
 
 // Etiqueta de clase con el aforo real: confirmados + retenidos por pagos en curso.
@@ -5434,9 +5573,9 @@ async function acceptRequest(requestId) {
 
     try {
         // El servidor rehace todas las validaciones (aforo con plazas retenidas,
-        // margen de 60 min, precio) y es quien decide: aquí solo mostramos el resultado.
-        const monitorId = getCurrentUser()?.id;
-        const { expiresAt } = await db.createCheckoutSession(requestId, monitorId);
+        // margen de 60 min, precio) y verifica por el JWT que quien acepta es el
+        // monitor responsable: aquí solo mostramos el resultado.
+        const { expiresAt } = await db.createCheckoutSession(requestId);
 
         showToast(`Link de pago enviado a ${name} · tiene ${formatTimeLeft(expiresAt)} para pagar`);
     } catch (error) {
@@ -5541,6 +5680,8 @@ async function handleIncomingNotification(notif) {
     if (!notif) return;
 
     if (isMonitor()) {
+        // La campana 🔔 se actualiza con cualquier aviso entrante.
+        renderNotifBadge();
         if (notif.type === 'nueva_solicitud') {
             // Actualiza el badge y, si el modal está abierto, refresca la lista.
             refreshSolicitudesAfterChange();

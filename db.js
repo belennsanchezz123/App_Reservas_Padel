@@ -1278,14 +1278,27 @@ const db = {
     // PAGOS STRIPE (Cloudflare Pages Functions, no Supabase)
     // La clave secreta de Stripe vive solo en el servidor: el navegador se limita
     // a pedir el link de pago y a consultar el estado.
+    // Los endpoints exigen el JWT de sesión (Authorization): el servidor deriva
+    // de él QUIÉN llama (alumno o personal) y no se fía de ids del body.
     // ==========================================
 
+    // Cabecera Authorization con el token de la sesión actual de Supabase Auth.
+    async authHeaders() {
+        try {
+            const { data } = await supabase.auth.getSession();
+            const token = data?.session?.access_token;
+            return token ? { 'Authorization': `Bearer ${token}` } : {};
+        } catch (e) {
+            return {};
+        }
+    },
+
     // El monitor acepta -> el servidor crea la sesión de Checkout y retiene la plaza.
-    async createCheckoutSession(requestId, monitorId) {
+    async createCheckoutSession(requestId) {
         const res = await fetch('/api/checkout/create', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requestId, monitorId }),
+            headers: { 'Content-Type': 'application/json', ...(await this.authHeaders()) },
+            body: JSON.stringify({ requestId }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'No se pudo generar el link de pago');
@@ -1294,7 +1307,9 @@ const db = {
 
     // El alumno vuelve de Stripe: confirma el estado real por si el webhook aún no llegó.
     async getCheckoutStatus(requestId) {
-        const res = await fetch(`/api/checkout/status?requestId=${encodeURIComponent(requestId)}`);
+        const res = await fetch(`/api/checkout/status?requestId=${encodeURIComponent(requestId)}`, {
+            headers: await this.authHeaders(),
+        });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'No se pudo consultar el estado del pago');
         return data;
@@ -1302,11 +1317,12 @@ const db = {
 
     // El alumno se da de baja de una clase (>=24h). Si estaba pagada, el servidor
     // le genera una clase por recuperar. Devuelve { ok, recovery }.
-    async leaveClass(classId, studentId) {
+    // El servidor deduce el alumno del token; no se envía studentId.
+    async leaveClass(classId) {
         const res = await fetch('/api/enrollment/leave', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ classId, studentId }),
+            headers: { 'Content-Type': 'application/json', ...(await this.authHeaders()) },
+            body: JSON.stringify({ classId }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'No se pudo procesar la baja');
@@ -1348,9 +1364,13 @@ const db = {
         }
     },
 
+    // SIN .select() a propósito: con RLS, el remitente (p. ej. el alumno que avisa
+    // al monitor) NO puede LEER la notificación que acaba de crear (solo el
+    // destinatario puede), y pedir la fila de vuelta aborta el insert con 42501.
+    // Ningún llamador usa la fila devuelta.
     async createNotification(notification) {
         try {
-            const { data, error } = await supabase
+            const { error } = await supabase
                 .from('notifications')
                 .insert([{
                     recipient_id: notification.recipientId,
@@ -1359,11 +1379,9 @@ const db = {
                     request_id: notification.requestId || null,
                     class_id: notification.classId || null,
                     message: notification.message || null,
-                }])
-                .select()
-                .single();
+                }]);
             if (error) throw error;
-            return data;
+            return true;
         } catch (error) {
             console.error('Error creating notification:', error);
             throw error;
@@ -1382,6 +1400,36 @@ const db = {
             return data;
         } catch (error) {
             console.error('Error marking notification read:', error);
+            throw error;
+        }
+    },
+
+    // Borrado de avisos (bandeja 🔔). RLS solo permite borrar los propios
+    // (política notifications_delete en rls_activacion_final.sql).
+    async deleteNotification(id) {
+        try {
+            const { error } = await supabase
+                .from('notifications')
+                .delete()
+                .eq('id', id);
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error deleting notification:', error);
+            throw error;
+        }
+    },
+
+    async deleteAllNotifications(recipientId) {
+        try {
+            const { error } = await supabase
+                .from('notifications')
+                .delete()
+                .eq('recipient_id', recipientId);
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error deleting all notifications:', error);
             throw error;
         }
     },

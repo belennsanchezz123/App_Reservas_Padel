@@ -1,12 +1,17 @@
-// POST /api/checkout/create  { requestId, monitorId }
+// POST /api/checkout/create  { requestId }
 //
 // Lo llama el monitor al pulsar "Aceptar" en el modal de Solicitudes. Genera la
 // sesión de Stripe Checkout y deja la solicitud en 'aceptada_pendiente_pago'
 // (la plaza queda RETENIDA, pero el alumno todavía NO entra en la clase).
 //
 // Toda la validación se rehace aquí: el cliente no es fuente de verdad.
+// AUTENTICACIÓN: quien llama debe ser PERSONAL (su JWT en Authorization); si la
+// solicitud tiene monitor responsable, solo ese monitor o el coordinador pueden
+// aceptarla. Antes el monitorId venía en el body y era falsificable (un alumno
+// podía "aceptarse" su propia solicitud).
 
 import { selectOne, patch, notify, rpc } from '../../_shared/supabase.js';
+import { getAuthUser, getStaffFromAuth } from '../../_shared/auth.js';
 import { createCheckoutSession } from '../../_shared/stripe.js';
 import {
     classStartMs, paymentDeadlineMs,
@@ -48,14 +53,27 @@ export async function onRequestPost({ request, env }) {
         return json({ error: 'Cuerpo de la petición no válido' }, 400);
     }
 
-    const { requestId, monitorId } = body || {};
+    const { requestId } = body || {};
     if (!requestId) return json({ error: 'Falta requestId' }, 400);
 
     try {
+        // Identidad real del que llama: debe ser personal del club.
+        const authUser = await getAuthUser(env, request);
+        if (!authUser) return json({ error: 'No autenticado' }, 401);
+        const staff = await getStaffFromAuth(env, authUser.id);
+        if (!staff) return json({ error: 'Solo el personal puede aceptar solicitudes' }, 403);
+
         const solicitud = await selectOne(env, 'class_requests',
             `id=eq.${encodeURIComponent(requestId)}&select=*`);
 
         if (!solicitud) return json({ error: 'La solicitud no existe' }, 404);
+
+        // El monitor que acepta debe ser el responsable de la solicitud
+        // (el coordinador puede aceptar cualquiera).
+        if (staff.role !== 'coordinador'
+            && solicitud.monitor_id && solicitud.monitor_id !== staff.id) {
+            return json({ error: 'Esta solicitud no es tuya' }, 403);
+        }
 
         // Si ya tiene sesión activa, devolvemos la misma en vez de crear otra
         // (doble clic del monitor, reintento tras un error de red...).
@@ -69,10 +87,6 @@ export async function onRequestPost({ request, env }) {
         }
         if (solicitud.status !== 'pendiente') {
             return json({ error: 'La solicitud ya está resuelta' }, 409);
-        }
-        // El monitor que acepta debe ser el responsable de la solicitud.
-        if (monitorId && solicitud.monitor_id && solicitud.monitor_id !== monitorId) {
-            return json({ error: 'Esta solicitud no es tuya' }, 403);
         }
 
         const cls = await selectOne(env, 'classes',
