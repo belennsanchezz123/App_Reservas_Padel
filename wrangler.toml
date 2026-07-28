@@ -1,0 +1,16 @@
+# Config de Wrangler para desarrollo local (`npx wrangler pages dev .`).
+#
+# compatibility_date FIJA (no depende del reloj del sistema): sin esto, wrangler
+# usa la fecha de HOY por defecto, y como el reloj sigue avanzando cada día, tarde
+# o temprano supera lo que el binario de workerd instalado sabe soportar y el
+# servidor deja de arrancar ("This Worker requires compatibility date X, but the
+# newest date supported by this server binary is Y").
+#
+# Fijar una fecha pasada es seguro y NO caduca: las compatibility dates de
+# Cloudflare son acumulativas y retrocompatibles para siempre. Subir la fecha
+# más adelante (tras actualizar `wrangler`) es opcional, solo para adoptar
+# comportamientos nuevos de la plataforma; nunca hace falta para que siga
+# funcionando.
+name = "padel-class-management"
+compatibility_date = "2026-07-17"
+pages_build_output_dir = "."

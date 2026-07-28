@@ -1162,6 +1162,27 @@ const db = {
         }
     },
 
+    // ¿El alumno tiene una plaza PAGADA (Stripe) en esta clase? Devuelve la
+    // solicitud confirmada o null. Lo usa el monitor al quitar a un alumno: si
+    // había pagado se le da clase por recuperar; si no, la plaza se pierde.
+    // (RLS: el monitor lee las solicitudes de sus clases por monitor_id.)
+    async getPaidRequestForClass(classId, studentId) {
+        try {
+            const { data, error } = await supabase
+                .from('class_requests')
+                .select('id')
+                .eq('class_id', classId)
+                .eq('student_id', studentId)
+                .eq('status', 'confirmada_pagada')
+                .maybeSingle();
+            if (error) throw error;
+            return data || null;
+        } catch (error) {
+            console.error('Error checking paid request for class:', error);
+            return null;
+        }
+    },
+
     // Todas las solicitudes pendientes de una clase (para auto-rechazo al llenarse).
     async getPendingRequestsForClass(classId) {
         try {

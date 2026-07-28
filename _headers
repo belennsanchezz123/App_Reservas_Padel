@@ -1,0 +1,10 @@
+# Cabeceras de Cloudflare Pages (y wrangler pages dev en local).
+#
+# El index.html NO debe cachearse: es quien referencia los ?v=N de app.js/db.js/
+# styles.css. Si el navegador (sobre todo Safari en iOS) sirve un index viejo,
+# carga versiones antiguas de los scripts y no se ven los cambios. Con no-cache,
+# el navegador revalida el HTML en cada carga y siempre coge los ?v= correctos.
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache

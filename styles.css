@@ -1669,6 +1669,19 @@ body {
     display: flex;
 }
 
+/* Bloqueo de scroll de fondo unificado (modales y vista de día).
+   Técnica robusta iOS: position:fixed en vez de solo overflow:hidden, porque
+   Safari iOS sigue desplazando el fondo con overflow:hidden. El JS fija el
+   desplazamiento con `top: -scrollY` y lo restaura al liberar
+   (lockBackgroundScroll / unlockBackgroundScroll en app.js). */
+body.scroll-locked {
+    position: fixed;
+    left: 0;
+    right: 0;
+    width: 100%;
+    overflow: hidden;
+}
+
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -1687,6 +1700,8 @@ body {
     width: 100%;
     max-height: 90vh;
     overflow-y: auto;
+    /* El scroll interno no se propaga al calendario de fondo al llegar al borde */
+    overscroll-behavior: contain;
     animation: slideUp var(--transition-normal);
     animation-fill-mode: forwards;
 }
@@ -2053,11 +2068,82 @@ form {
 }
 
 .students-selector {
-    max-height: 200px;
-    overflow-y: auto;
     border: 2px solid var(--gray-200);
     border-radius: var(--radius-md);
     padding: var(--spacing-md);
+    /* overflow visible: el desplegable del autocompletado flota fuera del recuadro */
+    overflow: visible;
+}
+
+/* --- Autocompletado de alumnos (input + desplegable flotante) --- */
+.students-autocomplete {
+    position: relative;
+    margin-top: 0.5rem;
+}
+
+.students-autocomplete input {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+}
+
+.students-autocomplete input:disabled {
+    background: var(--gray-100);
+    color: var(--gray-500);
+    cursor: not-allowed;
+}
+
+.students-autocomplete-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 50;
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.students-autocomplete-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--gray-100);
+    padding: 0.6rem 0.75rem;
+    cursor: pointer;
+}
+
+.students-autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.students-autocomplete-item:hover,
+.students-autocomplete-item:focus {
+    background: var(--gray-50);
+}
+
+.students-autocomplete-item strong {
+    font-weight: 600;
+}
+
+.students-autocomplete-item span {
+    font-size: 0.85rem;
+    color: var(--gray-600);
+}
+
+.students-autocomplete-empty {
+    padding: 0.6rem 0.75rem;
+    color: var(--gray-500);
+    font-size: var(--font-size-sm);
 }
 
 .student-checkbox {
@@ -2323,7 +2409,7 @@ form {
     /* Vista de día a PANTALLA COMPLETA con UNA sola superficie de scroll
        (estilo calendario de iOS): la barra superior y el título quedan fijos,
        y solo la rejilla de horas se desplaza. La página de detrás no scrollea
-       (body.day-view-open la bloquea). */
+       (body.scroll-locked la bloquea). */
     .day-classes-panel.visible {
         display: flex;
         flex-direction: column;
@@ -2372,11 +2458,8 @@ form {
         margin-bottom: var(--spacing-md);
     }
 
-    /* Con la vista de día abierta, la página de fondo no debe scrollear */
-    body.day-view-open {
-        overflow: hidden;
-    }
-
+    /* El bloqueo de fondo de la vista de día lo lleva ahora body.scroll-locked
+       (unificado con los modales, ver lockBackgroundScroll en app.js) */
 
     .toast-container {
         right: var(--spacing-md);
@@ -2473,6 +2556,42 @@ form {
         background: var(--gray-300);
         margin: 8px auto 0;
         flex-shrink: 0;
+    }
+
+    /* SHEETS EXPANDIBLES (avisos, buscar clases): altura fija por anclaje,
+       cabecera fija y lista interna con su propio scroll. El arrastre de la
+       barra de arriba cambia la altura (JS: setupExpandableSheet). */
+    .modal.sheet-expandable .modal-content {
+        height: 60dvh;                 /* anclaje medio inicial */
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;              /* el scroll lo lleva la lista interna */
+    }
+    .modal.sheet-expandable .modal-header {
+        flex-shrink: 0;
+    }
+    /* Avisos: la lista llena el espacio disponible y scrollea */
+    .modal.sheet-expandable .solicitudes-list {
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+        overflow-y: auto;
+    }
+    /* Buscar clases: el cuerpo llena y dentro scrollean los resultados */
+    .modal.sheet-expandable .modal-body {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    .modal.sheet-expandable .modal-body .form-group {
+        flex-shrink: 0;
+    }
+    .modal.sheet-expandable .search-classes-results {
+        flex: 1;
+        min-height: 0;
+        max-height: none;
     }
 
     /* EXCEPCIÓN: confirmaciones rápidas (.modal-center) = alerta centrada
@@ -5655,4 +5774,54 @@ form {
 }
 .notif-delete:hover {
     color: #dc2626;
+}
+
+/* Acciones por alumno en el detalle de clase (Ausente + quitar) */
+.student-item-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+/* dentro del contenedor de acciones, el botón Ausente ya no empuja solo */
+.student-item-actions .btn-absence {
+    margin-left: 0;
+}
+/* ✕ para quitar al alumno de la clase (libera la plaza) */
+.btn-remove-student {
+    background: none;
+    border: none;
+    color: var(--gray-500);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    line-height: 1;
+    padding: 0.2rem 0.45rem;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+.btn-remove-student:hover {
+    color: #fff;
+    background: #dc2626;
+}
+
+/* Campana de avisos flotante (móvil, junto a la lupa): badge sobre el icono */
+.notif-icon-btn {
+    position: relative;
+    overflow: visible;
+}
+.notif-icon-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background: #dc2626;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    box-shadow: 0 0 0 2px white;
 }

@@ -298,6 +298,43 @@ function withViewTransition(update) {
     }
 }
 
+// ==========================================
+// BLOQUEO DE SCROLL DE FONDO (unificado) — modales y vista de día
+// Técnica robusta iOS: position:fixed + guardar/restaurar scrollY, porque
+// overflow:hidden NO frena el scroll táctil en Safari iOS. El bloqueo se lleva
+// por "propietarios" (Set) en vez de un contador: es idempotente (se puede
+// pedir el mismo bloqueo varias veces, p. ej. renderDayClassesPanel en cada
+// refresco) y soporta anidamiento (un modal sobre la vista de día). El fondo
+// solo se libera cuando TODOS los propietarios lo sueltan.
+// ==========================================
+const scrollLockOwners = new Set();
+let scrollLockSavedY = 0;
+
+function lockBackgroundScroll(owner) {
+    if (scrollLockOwners.has(owner)) return;
+    const firstLock = scrollLockOwners.size === 0;
+    scrollLockOwners.add(owner);
+    if (!firstLock) return; // ya estaba bloqueado: solo registramos el propietario
+    scrollLockSavedY = window.scrollY;
+    // Compensar el ancho de la barra de scroll para que el fondo no "salte"
+    // al desaparecer la barra en escritorio
+    const scrollbarW = window.innerWidth - document.documentElement.clientWidth;
+    if (scrollbarW > 0) document.body.style.paddingRight = `${scrollbarW}px`;
+    document.body.style.top = `-${scrollLockSavedY}px`;
+    document.body.classList.add('scroll-locked');
+}
+
+function unlockBackgroundScroll(owner) {
+    if (!scrollLockOwners.has(owner)) return;
+    scrollLockOwners.delete(owner);
+    if (scrollLockOwners.size > 0) return; // aún quedan propietarios: seguir bloqueado
+    document.body.classList.remove('scroll-locked');
+    document.body.style.top = '';
+    document.body.style.paddingRight = '';
+    // Restaurar la posición exacta que tenía la página antes de bloquear
+    window.scrollTo(0, scrollLockSavedY);
+}
+
 function timeStringToMinutes(timeStr) {
     if (!timeStr) return 0;
     const [h, m] = String(timeStr).split(':').map(n => parseInt(n, 10) || 0);
@@ -1002,8 +1039,8 @@ function closeDayViewToMonth() {
         mobileViewLevel = 'month';
         const panel = document.getElementById('dayClassesPanel');
         if (panel) panel.classList.remove('visible');
-        // Restaurar el scroll de la página antes de recolocar el mes
-        document.body.classList.remove('day-view-open');
+        // Liberar el bloqueo de fondo (scrollToMonthSection recolocará después)
+        unlockBackgroundScroll('day-view');
         const monthWrapper = document.getElementById('monthCalendarWrapper');
         if (monthWrapper) monthWrapper.style.display = '';
         // Refrescar las secciones (los datos pudieron cambiar en la vista de
@@ -1598,6 +1635,24 @@ function renderMonthCalendar() {
         const topActions = document.createElement('div');
         topActions.className = 'month-top-actions';
 
+        // Campana de avisos 🔔, A LA IZQUIERDA de la lupa, mismo tamaño de icono.
+        // Se crea SIEMPRE (oculta): esta toolbar se construye una sola vez y puede
+        // montarse ANTES de resolverse el rol del usuario (primer renderCalendar de
+        // initializeApp, con currentUser aún null). renderNotifBadge la muestra
+        // cuando ya se sabe que el usuario es monitor. Misma bandeja que el botón
+        // de escritorio.
+        const notifFloatBtn = document.createElement('button');
+        notifFloatBtn.type = 'button';
+        notifFloatBtn.className = 'day-icon-btn notif-icon-btn';
+        notifFloatBtn.id = 'notifBellBtnMobile';
+        notifFloatBtn.title = 'Avisos';
+        notifFloatBtn.setAttribute('aria-label', 'Avisos');
+        notifFloatBtn.style.display = 'none';
+        notifFloatBtn.innerHTML = '🔔<span class="notif-icon-badge" id="notifBellBadgeMobile" style="display:none;">0</span>';
+        notifFloatBtn.addEventListener('click', () => openNotifModal());
+        topActions.appendChild(notifFloatBtn);
+        renderNotifBadge();
+
         const searchFloatBtn = document.createElement('button');
         searchFloatBtn.type = 'button';
         searchFloatBtn.className = 'day-icon-btn';
@@ -1733,7 +1788,7 @@ function renderMonthCalendar() {
     } else {
         const panel = document.getElementById('dayClassesPanel');
         if (panel) panel.classList.remove('visible');
-        document.body.classList.remove('day-view-open');
+        unlockBackgroundScroll('day-view');
         wrapper.style.display = '';
     }
 }
@@ -1754,8 +1809,9 @@ function renderDayClassesPanel(date) {
     if (!panel || !titleEl || !gridEl) return;
 
     panel.classList.add('visible');
-    // Vista de día a pantalla completa: bloquear el scroll de la página de fondo
-    document.body.classList.add('day-view-open');
+    // Vista de día a pantalla completa: bloquear el scroll de la página de fondo.
+    // Idempotente: renderDayClassesPanel se llama en cada refresco de datos.
+    lockBackgroundScroll('day-view');
 
     const d = new Date(date);
     const weekdayIndex = (d.getDay() + 6) % 7; // 0=Lunes
@@ -2974,6 +3030,10 @@ function openEditStudentModal(studentId) {
 
 // (No dropdown/modal renderer here — keep student rendering in `renderStudentsList` and `renderStudentsSelector`)
 
+// Handler de "click fuera" del autocompletado de alumnos: se re-registra en
+// cada render, así que guardamos la referencia para limpiar el anterior.
+let studentsSelectorOutsideHandler = null;
+
 function renderStudentsSelector() {
     const container = document.getElementById('studentsSelector');
     if (!container) {
@@ -3019,94 +3079,107 @@ function renderStudentsSelector() {
                 const idx = selected.indexOf(id);
                 if (idx !== -1) selected.splice(idx, 1);
                 renderSelectedPills();
+                updateInputState(); // al bajar de 4, reactivar el input de búsqueda
             });
             pill.appendChild(removeBtn);
             selectedWrap.appendChild(pill);
         });
     }
 
-    // Search input
+    // ---- Autocompletado: input + desplegable flotante ----
+    const MIN_CHARS = 1; // subir a 2 si el desplegable genera demasiado ruido
+
     const searchWrap = document.createElement('div');
-    searchWrap.style.margin = '0.5rem 0';
+    searchWrap.className = 'students-autocomplete';
+
     const searchInput = document.createElement('input');
     searchInput.type = 'search';
     searchInput.id = 'studentsSelectorSearch';
-    searchInput.placeholder = 'Buscar alumno...';
-    searchInput.style.width = '100%';
-    searchInput.style.padding = '0.5rem';
-    searchInput.style.border = '1px solid var(--gray-200)';
-    searchInput.style.borderRadius = '6px';
+    searchInput.autocomplete = 'off';
     searchWrap.appendChild(searchInput);
 
-    // Results list
-    const results = document.createElement('div');
-    results.id = 'studentsSelectorResults';
-    results.style.maxHeight = '180px';
-    results.style.overflow = 'auto';
-    results.style.marginTop = '0.5rem';
+    // Desplegable flotante: oculto salvo que haya texto suficiente
+    const dropdown = document.createElement('div');
+    dropdown.id = 'studentsSelectorResults';
+    dropdown.className = 'students-autocomplete-dropdown';
+    dropdown.hidden = true;
+    searchWrap.appendChild(dropdown);
+
+    const isFull = () => selected.length >= CONFIG.maxStudentsPerClass;
+
+    function hideDropdown() {
+        dropdown.hidden = true;
+        dropdown.innerHTML = '';
+    }
+
+    // Habilita/deshabilita el input según el límite de plazas
+    function updateInputState() {
+        if (isFull()) {
+            searchInput.value = '';
+            searchInput.disabled = true;
+            searchInput.placeholder = `Máximo ${CONFIG.maxStudentsPerClass} alumnos`;
+            hideDropdown();
+        } else {
+            searchInput.disabled = false;
+            searchInput.placeholder = 'Buscar alumno...';
+        }
+    }
 
     function renderResults(q = '') {
-        results.innerHTML = '';
-        const query = (q || '').toLowerCase();
-        const list = appState.students.filter(s => s.active !== false && (s.name.toLowerCase().includes(query) || (s.email || '').toLowerCase().includes(query)));
+        const query = (q || '').trim().toLowerCase();
+        if (query.length < MIN_CHARS || isFull()) { hideDropdown(); return; }
+        // Filtro en memoria (sin backend), excluyendo los ya seleccionados
+        const list = appState.students.filter(s =>
+            s.active !== false &&
+            !selected.includes(s.id) &&
+            (s.name.toLowerCase().includes(query) || (s.email || '').toLowerCase().includes(query))
+        );
+        dropdown.innerHTML = '';
+        dropdown.hidden = false;
         if (list.length === 0) {
-            const e = document.createElement('div');
-            e.style.color = 'var(--gray-500)';
-            e.style.padding = '0.5rem 0';
-            e.textContent = 'No se encontraron alumnos';
-            results.appendChild(e);
+            const empty = document.createElement('div');
+            empty.className = 'students-autocomplete-empty';
+            empty.textContent = 'No se encontraron alumnos';
+            dropdown.appendChild(empty);
             return;
         }
         list.forEach(s => {
-            const item = document.createElement('div');
-            item.className = 'student-search-item';
-            item.style.display = 'flex';
-            item.style.justifyContent = 'space-between';
-            item.style.alignItems = 'center';
-            item.style.padding = '0.5rem';
-            item.style.borderBottom = '1px solid var(--gray-100)';
-
-            const left = document.createElement('div');
-            left.innerHTML = `<strong>${s.name}</strong><div style="font-size:0.85rem; color:var(--gray-600);">${s.email || ''}</div>`;
-
-            const action = document.createElement('button');
-            action.className = 'btn btn-secondary';
-            action.type = 'button';
-            const isSelected = selected.includes(s.id);
-            const isFull = selected.length >= CONFIG.maxStudentsPerClass;
-            action.textContent = isSelected ? 'Quitar' : (isFull ? 'Completo' : 'Añadir');
-            if (!isSelected && isFull) action.disabled = true;
-            action.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (selected.includes(s.id)) {
-                    const idx = selected.indexOf(s.id);
-                    if (idx !== -1) selected.splice(idx, 1);
-                } else {
-                    if (selected.length >= CONFIG.maxStudentsPerClass) {
-                        showToast(`Máximo ${CONFIG.maxStudentsPerClass} alumnos por clase`, 'error');
-                        return;
-                    }
-                    selected.push(s.id);
-                }
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'students-autocomplete-item';
+            item.innerHTML = `<strong>${escapeHtml(s.name)}</strong><span>${escapeHtml(s.email || '')}</span>`;
+            // Click en un resultado: añadir directo, limpiar input y cerrar
+            item.addEventListener('click', () => {
+                if (isFull()) return;
+                selected.push(s.id);
+                searchInput.value = '';
+                hideDropdown();
                 renderSelectedPills();
-                renderResults(searchInput.value);
+                updateInputState();
             });
-
-            item.appendChild(left);
-            item.appendChild(action);
-            results.appendChild(item);
+            dropdown.appendChild(item);
         });
     }
 
-    // Wire search
     searchInput.addEventListener('input', (e) => renderResults(e.target.value));
+    // Reabrir si ya hay texto al volver a enfocar
+    searchInput.addEventListener('focus', (e) => renderResults(e.target.value));
 
-    // Initial render
+    // Cerrar al hacer click fuera. Se re-registra en cada render, así que
+    // limpiamos el handler anterior para no acumular listeners.
+    if (studentsSelectorOutsideHandler) {
+        document.removeEventListener('pointerdown', studentsSelectorOutsideHandler);
+    }
+    studentsSelectorOutsideHandler = (e) => {
+        if (!searchWrap.contains(e.target)) hideDropdown();
+    };
+    document.addEventListener('pointerdown', studentsSelectorOutsideHandler);
+
+    // Montaje: contador/pills arriba, buscador (con su desplegable) debajo
     container.appendChild(selectedWrap);
     container.appendChild(searchWrap);
-    container.appendChild(results);
     renderSelectedPills();
-    renderResults('');
+    updateInputState();
 }
 
 // ==========================================
@@ -3520,6 +3593,108 @@ function changeMonitorYear(btn, monitorId, delta) {
 function openModal(modalId) {
     const modal = document.getElementById(modalId);
     modal.classList.add('active');
+    // Sheets expandibles: reabrir siempre en el anclaje medio (limpiar el
+    // tamaño/desplazamiento que dejara la sesión anterior)
+    if (modal.classList.contains('sheet-expandable')) {
+        const c = modal.querySelector('.modal-content');
+        if (c) { c.style.height = ''; c.style.transform = ''; c.style.transition = ''; }
+    }
+    // Bloquear el scroll del fondo mientras el modal está abierto (por id, así
+    // varios modales conviven y el fondo se libera al cerrar el último)
+    lockBackgroundScroll(modalId);
+}
+
+// ==========================================
+// SHEETS EXPANDIBLES (estilo iOS con detents) — avisos y buscar clases
+// Se arrastra la BARRA DE ARRIBA (cabecera + asa), no la lista:
+//   · hacia arriba  → el panel crece (medio → grande)
+//   · hacia abajo   → encoge (grande → medio) y, pasado el medio, se cierra
+// La lista interna conserva su propio scroll (arrastrarla no mueve el sheet).
+// Dos anclajes: medio (~60% alto) y grande (~92% alto).
+// ==========================================
+const SHEET_MEDIUM_RATIO = 0.6;
+const SHEET_LARGE_RATIO = 0.92;
+
+function setupExpandableSheet(modal) {
+    const content = modal.querySelector('.modal-content');
+    if (!content) return;
+
+    let startY = 0;
+    let startH = 0;
+    let dragging = false;
+    let mode = null;      // 'resize' | 'dismiss'
+    let overNow = 0;      // px arrastrados por debajo del anclaje medio (modo cierre)
+    let mediumH = 0;
+    let largeH = 0;
+
+    const easing = 'height 0.28s cubic-bezier(0.32, 0.72, 0, 1), transform 0.28s cubic-bezier(0.32, 0.72, 0, 1)';
+
+    content.addEventListener('touchstart', (e) => {
+        if (!isMobileLayout() || e.touches.length !== 1) return;
+        // El gesto arranca solo desde la barra superior: el asa (target = content)
+        // o la cabecera. La lista scrollea con normalidad. El botón ✕ hace su tap.
+        if (e.target.closest('.btn-close')) return;
+        const fromTopBar = e.target === content || e.target.closest('.modal-header');
+        if (!fromTopBar) return;
+        mediumH = Math.round(window.innerHeight * SHEET_MEDIUM_RATIO);
+        largeH = Math.round(window.innerHeight * SHEET_LARGE_RATIO);
+        startY = e.touches[0].clientY;
+        startH = content.getBoundingClientRect().height;
+        dragging = true;
+        mode = null;
+        overNow = 0;
+    }, { passive: true });
+
+    content.addEventListener('touchmove', (e) => {
+        if (!dragging) return;
+        const dy = e.touches[0].clientY - startY;   // + hacia abajo, − hacia arriba
+        const targetH = startH - dy;                 // arrastrar arriba ⇒ más alto
+        content.style.transition = 'none';
+        if (targetH >= mediumH) {
+            // Redimensionar entre medio y grande
+            mode = 'resize';
+            overNow = 0;
+            content.style.transform = '';
+            content.style.height = `${Math.min(targetH, largeH)}px`;
+        } else {
+            // Por debajo del anclaje medio: modo cierre (deslizar hacia fuera)
+            mode = 'dismiss';
+            overNow = mediumH - targetH;
+            content.style.height = `${mediumH}px`;
+            content.style.transform = `translateY(${overNow}px)`;
+        }
+        e.preventDefault();
+    }, { passive: false });
+
+    const end = () => {
+        if (!dragging) return;
+        dragging = false;
+        content.style.transition = easing;
+        if (mode === 'dismiss') {
+            const dismissThreshold = Math.min(mediumH * 0.25, 120);
+            if (overNow > dismissThreshold) {
+                content.style.transform = 'translateY(100%)';
+                setTimeout(() => {
+                    closeModal(modal.id);
+                    content.style.transform = '';
+                    content.style.height = '';
+                    content.style.transition = '';
+                }, 240);
+                return;
+            }
+            // No llegó al umbral: rebota al anclaje medio
+            content.style.transform = '';
+            content.style.height = `${mediumH}px`;
+        } else if (mode === 'resize') {
+            // Ajustar al anclaje más cercano
+            const h = content.getBoundingClientRect().height;
+            const mid = (mediumH + largeH) / 2;
+            content.style.height = `${h >= mid ? largeH : mediumH}px`;
+        }
+        setTimeout(() => { content.style.transition = ''; }, 300);
+    };
+    content.addEventListener('touchend', end);
+    content.addEventListener('touchcancel', end);
 }
 
 // ==========================================
@@ -3532,6 +3707,12 @@ function setupSheetDragDismiss() {
     document.querySelectorAll('.modal').forEach(modal => {
         // Las alertas centradas (.modal-center) no son sheets: sin arrastre
         if (modal.classList.contains('modal-center')) return;
+        // Sheets expandibles (avisos, buscar clases): arrastrar la barra de
+        // arriba para agrandar/encoger/cerrar (detents estilo iOS)
+        if (modal.classList.contains('sheet-expandable')) {
+            setupExpandableSheet(modal);
+            return;
+        }
         const content = modal.querySelector('.modal-content');
         if (!content) return;
 
@@ -3607,6 +3788,9 @@ function setupSheetDragDismiss() {
 function closeModal(modalId) {
     const modal = document.getElementById(modalId);
     modal.classList.remove('active');
+    // El Set de propietarios libera el fondo solo cuando no queda ningún otro
+    // bloqueo activo (otro modal o la vista de día)
+    unlockBackgroundScroll(modalId);
 }
 
 function openAddClassModal(day = '', hour = null, minute = 0) {
@@ -3715,7 +3899,12 @@ function showClassDetails(classId) {
                 const absenceBtn = canMarkAbsence
                     ? `<button class="btn-icon-sm btn-absence" onclick="markAbsence('${cls.id}', '${studentId}')" title="Marcar ausencia (clase por recuperar)">🔁 Ausente</button>`
                     : '';
-                studentsHtml += `<div class="student-item"><span>${escapeHtml(student.name)}${levelHtml}</span>${absenceBtn}</div>`;
+                // Sacar al alumno de la clase (libera la plaza). Distinto de "Ausente":
+                // aquí SÍ deja de estar inscrito. Pregunta si darle clase por recuperar.
+                const removeBtn = canMarkAbsence
+                    ? `<button class="btn-icon-sm btn-remove-student" onclick="removeStudentFromClass('${cls.id}', '${studentId}')" title="Quitar de la clase (libera la plaza)">✕</button>`
+                    : '';
+                studentsHtml += `<div class="student-item"><span>${escapeHtml(student.name)}${levelHtml}</span><span class="student-item-actions">${absenceBtn}${removeBtn}</span></div>`;
             }
         });
     }
@@ -4379,6 +4568,48 @@ async function markAbsence(classId, studentId) {
     } catch (e) {
         console.error('Error registrando ausencia:', e);
         showToast('No se pudo registrar la ausencia', 'error');
+    }
+}
+
+// Saca a un alumno de la clase directamente desde el panel de detalle (sin pasar
+// por "Editar"). Libera la plaza (baja la ocupación). El monitor solo pulsa la ✕:
+// el sistema decide solo si darle recuperación según si HABÍA PAGADO la plaza
+//   - pagó (class_requests.confirmada_pagada) -> clase por recuperar (no la pierde)
+//   - no pagó (añadido a mano, o nunca pagó)  -> la plaza se pierde, sin recuperación
+// No confundir con markAbsence, que NO lo saca de la clase.
+async function removeStudentFromClass(classId, studentId) {
+    if (!(isMonitor() || isCoordinator())) return;
+    const cls = getClassById(classId);
+    const student = getStudentById(studentId);
+    if (!cls || !student) return;
+
+    if (!(await showConfirm(`¿Quitar a ${student.name} de esta clase? La plaza quedará libre.`,
+        { title: 'Quitar de la clase', confirmText: 'Quitar', cancelText: 'Cancelar', danger: true }))) return;
+
+    try {
+        // ¿Había pagado la plaza? Eso decide si se le da recuperación (automático).
+        const paid = await db.getPaidRequestForClass(classId, studentId);
+
+        const newStudents = (cls.students || []).filter(id => id !== studentId);
+        await updateClass(classId, { students: newStudents }, true);
+
+        if (paid) {
+            await db.createRecovery({
+                studentId,
+                originClassId: classId,
+                originDate: (cls.date || '').substring(0, 10),
+                notes: `Quitado de la clase pagada del ${formatDate(cls.date)} ${cls.startTime}`,
+            });
+        }
+
+        showToast(paid
+            ? `${student.name} quitado · había pagado, tiene una clase por recuperar`
+            : `${student.name} quitado de la clase`, 'success');
+
+        showClassDetails(classId); // refresca el panel abierto (ocupación y lista)
+    } catch (e) {
+        console.error('Error quitando al alumno de la clase:', e);
+        showToast('No se pudo quitar al alumno de la clase', 'error');
     }
 }
 
@@ -5364,25 +5595,35 @@ const NOTIF_ICONS = {
 
 // Pinta la campana con el nº de avisos no leídos del monitor logueado.
 async function renderNotifBadge() {
+    // Dos campanas según el layout: en ESCRITORIO el botón ancho (#notifBellBtn);
+    // en MÓVIL el icono flotante junto a la lupa (#notifBellBtnMobile). El icono
+    // móvil se crea siempre oculto (la toolbar se monta antes de saber el rol),
+    // así que aquí se decide su visibilidad ya con el rol resuelto.
     const btn = document.getElementById('notifBellBtn');
-    const badge = document.getElementById('notifBellBadge');
-    if (!btn || !badge) return;
-    if (!isMonitor()) {
-        btn.style.display = 'none';
-        return;
-    }
-    btn.style.display = '';
+    if (btn) btn.style.display = (isMonitor() && !isMobileLayout()) ? '' : 'none';
+    const mobileBtn = document.getElementById('notifBellBtnMobile');
+    if (mobileBtn) mobileBtn.style.display = isMonitor() ? '' : 'none';
+    if (!isMonitor()) return;
 
     const monitorId = getCurrentUser()?.id;
     if (!monitorId) return;
+
+    let count = 0;
     try {
         const rows = await db.getUnreadNotifications(monitorId);
-        const count = (rows || []).length;
-        badge.textContent = count > 9 ? '9+' : String(count);
-        badge.style.display = count > 0 ? '' : 'none';
+        count = (rows || []).length;
     } catch (error) {
         console.warn('No se pudo cargar el contador de avisos:', error);
+        return;
     }
+
+    const label = count > 9 ? '9+' : String(count);
+    ['notifBellBadge', 'notifBellBadgeMobile'].forEach(id => {
+        const badge = document.getElementById(id);
+        if (!badge) return;
+        badge.textContent = label;
+        badge.style.display = count > 0 ? '' : 'none';
+    });
 }
 
 // Abre la bandeja: lista los últimos avisos (no leídos resaltados) y, una vez
@@ -7319,7 +7560,7 @@ function initializeEventListeners() {
     document.querySelectorAll('.modal').forEach(modal => {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
-                modal.classList.remove('active');
+                closeModal(modal.id);
             }
         });
     });
